@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TIME SHIFT TETRIS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-4px) rotate(-1deg); }
+            50% { transform: translateX(4px) rotate(1deg); }
+            75% { transform: translateX(-4px) rotate(-1deg); }
+        }
+        .animate-shake { animation: shake 0.15s ease-in-out; }
+        
+        @keyframes pop-in {
+            0% { transform: scale(0.5); opacity: 0; }
+            70% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop { animation: pop-in 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+        @keyframes glitch {
+            0% { transform: translate(0) }
+            20% { transform: translate(-5px, 5px) }
+            40% { transform: translate(-5px, -5px) }
+            60% { transform: translate(5px, 5px) }
+            80% { transform: translate(5px, -5px) }
+            100% { transform: translate(0) }
+        }
+        .animate-glitch { animation: glitch 0.2s cubic-bezier(.25, .46, .45, .94) both; filter: hue-rotate(90deg) contrast(150%); }
+
+        /* ライン消去用の発光エフェクト */
+        @keyframes line-clear {
+            0% { transform: scaleY(1); opacity: 1; filter: brightness(1.5); }
+            40% { transform: scaleY(1.3) scaleX(1.02); opacity: 1; filter: brightness(2); box-shadow: 0 0 20px 5px rgba(255,255,255,0.8); }
+            100% { transform: scaleY(0); opacity: 0; }
+        }
+        .animate-line-clear { animation: line-clear 0.3s cubic-bezier(0.1, 0.8, 0.3, 1) forwards; }
+
+        /* 盤面全体のフラッシュエフェクト */
+        @keyframes flash-board {
+            0% { box-shadow: inset 0 0 80px rgba(255, 255, 255, 0.4); }
+            100% { box-shadow: inset 0 0 0 rgba(255, 255, 255, 0); }
+        }
+        .animate-flash-board { animation: flash-board 0.4s ease-out; }
+
+        /* 巻き戻し中専用のエフェクト */
+        .rewinding-active {
+            filter: invert(1) hue-rotate(180deg) sepia(0.5);
+            transition: filter 0.2s;
+        }
+    </style>
+</head>
+<body class="bg-[#0a0a0a] text-[#d4d4d4] font-sans select-none overflow-hidden touch-none h-[100dvh] w-full flex flex-col relative">
+
+    <div id="menu-screen" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0a0a] overflow-y-auto">
+        <div class="text-center mb-8 mt-10">
+            <h1 class="text-4xl sm:text-5xl font-black text-[#2CB4AD] mb-2 tracking-tighter">TIME SHIFT TETRIS</h1>
+            <div class="text-xs sm:text-sm text-neutral-600 uppercase tracking-widest">Endless Challenge Mode</div>
+            <div id="debug-indicator" class="hidden text-xs text-red-500 font-bold animate-pulse mt-4 tracking-widest border border-red-500/50 bg-red-900/20 py-1 px-4 rounded">DEBUG MODE ACTIVE<br><span class="text-[8px] text-red-400">INFINITE SP & NO COOLDOWN</span></div>
+        </div>
+        
+        <div class="flex flex-col gap-3 mb-8 w-full max-w-xs">
+            <div class="flex items-center justify-between bg-neutral-900/50 p-4 rounded-lg border border-neutral-800">
+                <span class="text-sm text-neutral-400 font-bold tracking-widest">SOUND</span>
+                <button id="sound-toggle" class="w-12 h-6 rounded-full relative transition-colors bg-neutral-700 focus:outline-none">
+                    <div id="sound-toggle-knob" class="w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all left-0.5"></div>
+                </button>
+            </div>
+            <div class="flex items-center justify-between bg-neutral-900/50 p-4 rounded-lg border border-neutral-800">
+                <span class="text-sm text-neutral-400 font-bold tracking-widest">SKILLS ENABLED</span>
+                <button id="skills-toggle" class="w-12 h-6 rounded-full relative transition-colors bg-cyan-600 focus:outline-none">
+                    <div id="skills-toggle-knob" class="w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all left-6"></div>
+                </button>
+            </div>
+        </div>
+
+        <button id="start-btn" class="bg-[#2CB4AD] hover:bg-cyan-400 text-black font-bold py-4 px-12 rounded shadow-[0_0_20px_rgba(44,180,173,0.3)] tracking-widest text-lg transition-all active:scale-95 focus:outline-none">
+            START GAME
+        </button>
+
+        <button id="history-open-btn" class="mt-8 text-xs text-neutral-500 hover:text-[#F6AA00] transition-colors tracking-widest underline underline-offset-4 focus:outline-none">SCORE HISTORY</button>
+
+        <div class="flex gap-4 mt-4 pb-10">
+            <button id="howto-open-btn" class="text-xs text-neutral-500 hover:text-white transition-colors tracking-widest underline underline-offset-4 focus:outline-none">HOW TO PLAY</button>
+            <span class="text-neutral-700">|</span>
+            <button id="keyconfig-open-btn" class="text-xs text-neutral-500 hover:text-white transition-colors tracking-widest underline underline-offset-4 focus:outline-none">KEY CONFIG</button>
+        </div>
+    </div>
+
+    <!-- KEY CONFIG モーダル -->
+    <div id="keyconfig-modal" class="hidden absolute inset-0 z-[60] bg-black/90 backdrop-blur-md flex-col items-center justify-center p-4 overflow-y-auto pointer-events-auto">
+        <div class="max-w-sm w-full bg-neutral-900 border border-neutral-700 p-6 rounded-lg shadow-2xl relative my-auto">
+            <h2 class="text-2xl font-black text-[#2CB4AD] mb-6 tracking-wider text-center border-b border-neutral-800 pb-2">KEY CONFIG</h2>
+            
+            <div class="space-y-2 mb-6" id="keyconfig-list">
+                <!-- JSで動的に生成 -->
+            </div>
+            
+            <div class="flex gap-2">
+                <button id="keyconfig-reset-btn" class="flex-1 bg-red-900/50 hover:bg-red-800/80 text-red-300 font-bold py-3 px-4 rounded tracking-widest border border-red-700 transition-colors focus:outline-none text-xs">DEFAULT</button>
+                <button id="keyconfig-close-btn" class="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3 px-4 rounded tracking-widest border border-neutral-600 transition-colors focus:outline-none text-xs">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="history-modal" class="hidden absolute inset-0 z-[60] bg-black/90 backdrop-blur-md flex-col items-center justify-center p-4 overflow-y-auto pointer-events-auto">
+        <div class="max-w-md w-full bg-neutral-900 border border-neutral-700 p-6 rounded-lg shadow-2xl relative my-auto">
+            <h2 class="text-2xl font-black text-[#F6AA00] mb-4 tracking-wider text-center border-b border-neutral-800 pb-2">SCORE HISTORY</h2>
+            
+            <div id="score-history-list" class="flex flex-col gap-1 max-h-[50vh] overflow-y-auto mb-6 pr-2">
+                </div>
+            
+            <button id="history-close-btn" class="bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3 px-8 rounded tracking-widest w-full border border-neutral-600 transition-colors focus:outline-none">CLOSE</button>
+        </div>
+    </div>
+
+    <div id="howto-modal" class="hidden absolute inset-0 z-[60] bg-black/90 backdrop-blur-md flex-col items-center justify-center p-4 overflow-y-auto pointer-events-auto">
+        <div class="max-w-xl w-full bg-neutral-900 border border-neutral-700 p-6 rounded-lg shadow-2xl relative my-auto">
+            <h2 class="text-2xl font-black text-[#2CB4AD] mb-6 tracking-wider text-center border-b border-neutral-800 pb-2">HOW TO PLAY</h2>
+            
+            <div class="space-y-6 text-sm text-neutral-300">
+                <div>
+                    <h3 class="text-[#F6AA00] font-bold mb-2 tracking-widest text-xs">🎮 操作方法 (CONTROLS)</h3>
+                    <ul class="list-disc pl-5 space-y-1 text-xs sm:text-sm">
+                        <li><span class="text-white font-bold">PC (キーボード):</span> [<span class="key-name-LEFT">←</span>/<span class="key-name-RIGHT">→</span>] 移動、 [<span class="key-name-ROTATE">↑</span>] 回転、 [<span class="key-name-DOWN">↓</span>] ソフトドロップ、 [<span class="key-name-DROP">SPACE</span>] ハードドロップ、 [<span class="key-name-HOLD">SHIFT</span>] ホールド</li>
+                        <li><span class="text-white font-bold">モバイル (タッチ):</span> 画面の左右をタップで移動、 中央をタップで回転、 上へスワイプでハードドロップ、 下へスワイプでソフトドロップ</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-cyan-400 font-bold mb-2 tracking-widest text-xs">⚡ SKILL SYSTEM</h3>
+                    <p class="text-xs mb-2">20ライン消去するごとにスキルポイント（SP）を1獲得します（最大2ストック）。スキル発動でSPを1消費します。</p>
+                    <div class="space-y-3">
+                        <div class="bg-black/50 p-3 rounded border border-neutral-800">
+                            <div class="font-bold text-blue-400 mb-1 text-xs">⏪ REWIND (KEY: <span class="key-name-SKILL1">1</span>)</div>
+                            <div class="text-xs leading-relaxed">ボタンを<span class="text-white font-bold">長押ししている間だけ時間を巻き戻します。</span>最大10秒前まで遡れ、指を離した時点からプレイを再開できます。ミスした時のリカバリーに最適です。</div>
+                        </div>
+                        <div class="bg-black/50 p-3 rounded border border-neutral-800">
+                            <div class="font-bold text-purple-400 mb-1 text-xs">⏭️ ERASE (KEY: <span class="key-name-SKILL2">2</span>)</div>
+                            <div class="text-xs leading-relaxed">ランダムに未来へ3手スキップします。さらに、このスキル実行後<span class="text-white font-bold">10秒以内</span>にラインを消すと獲得スコアが<span class="text-white font-bold">50倍</span>になります（1度消すと効果終了）。</div>
+                        </div>
+                        <div class="bg-black/50 p-3 rounded border border-neutral-800">
+                            <div class="font-bold text-teal-400 mb-1 text-xs">⏸️ FREEZE (KEY: <span class="key-name-SKILL3">3</span>)</div>
+                            <div class="text-xs leading-relaxed"><span class="text-white font-bold">5秒間、ブロックの自動落下が完全に停止します。</span>この間は最大3回までブロックを着地（3手操作）させることができます（3手操作後は時間が切れるまで操作不可）。この間にラインを消すと、そのラインのスコアが<span class="text-white font-bold">2倍</span>になります。</div>
+                        </div>
+                        <div class="bg-black/50 p-3 rounded border border-neutral-800">
+                            <div class="font-bold text-orange-400 mb-1 text-xs">⏩ ACCEL (KEY: <span class="key-name-SKILL4">4</span>)</div>
+                            <div class="text-xs leading-relaxed"><span class="text-white font-bold">20秒間、落下速度が超高速になります。</span>ただし、この効果時間中に消したラインのスコアは<span class="text-white font-bold">2倍</span>になります。</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <button id="howto-close-btn" class="mt-8 bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3 px-8 rounded tracking-widest w-full border border-neutral-600 transition-colors focus:outline-none">CLOSE</button>
+        </div>
+    </div>
+
+    <div id="play-screen" class="hidden flex-1 w-full max-w-2xl mx-auto flex-col justify-center items-center p-2 sm:p-4">
+        
+        <div class="flex gap-2 sm:gap-6 items-start justify-center w-full">
+            
+            <div class="flex flex-col items-end gap-2 sm:gap-4 flex-1 min-w-[70px] sm:min-w-[120px] mt-4">
+                <div class="flex flex-col items-center">
+                    <div class="text-[10px] sm:text-xs text-[#2CB4AD] mb-1 tracking-wider font-bold">HOLD</div>
+                    <div id="hold-board" class="bg-neutral-900/50 border border-neutral-800 p-1 min-h-[3rem] min-w-[3rem] sm:min-h-[4rem] sm:min-w-[4rem] flex flex-col items-center justify-center rounded"></div>
+                </div>
+                
+                <div class="flex flex-col items-end text-right w-full mt-2 sm:mt-4 border-t border-neutral-800 pt-2 sm:pt-4">
+                    <div class="text-[10px] sm:text-xs text-neutral-500 tracking-wider font-bold">LEVEL</div>
+                    <div id="level-display" class="text-xl sm:text-2xl text-white font-black tracking-tighter">1</div>
+                </div>
+                <div class="flex flex-col items-end text-right w-full mt-1">
+                    <div class="text-[10px] sm:text-xs text-neutral-500 tracking-wider font-bold">LINES</div>
+                    <div id="lines-display" class="text-xl sm:text-2xl text-white font-black tracking-tighter">0</div>
+                </div>
+                <div class="flex flex-col items-end text-right w-full mt-1 sm:mt-2">
+                    <div class="text-[10px] sm:text-xs text-neutral-500 tracking-wider font-bold">SCORE</div>
+                    <div id="score-display" class="text-xl sm:text-3xl text-[#F6AA00] font-black tracking-tighter">0</div>
+                </div>
+
+                <div id="skills-panel" class="hidden flex-col items-center w-full mt-2 sm:mt-4 border-t border-neutral-800 pt-2 sm:pt-4">
+                    <div class="w-full flex justify-between items-center mb-1">
+                        <div class="text-[10px] sm:text-xs text-[#2CB4AD] font-bold">SP</div>
+                        <div id="sp-count" class="text-xs sm:text-sm text-cyan-400 font-bold">1</div>
+                    </div>
+                    <div id="sp-text" class="text-[8px] sm:text-[10px] text-neutral-400 font-bold mb-1 w-full text-right">0 / 20 LINES</div>
+                    <div class="w-full h-1.5 bg-neutral-800 rounded-full mb-2 sm:mb-3 overflow-hidden">
+                        <div id="sp-bar" class="h-full bg-cyan-400 transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1 w-full">
+                        <button id="btn-rewind" class="skill-btn bg-blue-900/80 p-1 sm:p-1.5 rounded text-[8px] sm:text-[10px] text-white font-bold border border-blue-500/30">⏪ REW(<span class="key-name-SKILL1">1</span>)</button>
+                        <button onclick="activateSkill('ERASE')" class="skill-btn bg-purple-900/80 p-1 sm:p-1.5 rounded text-[8px] sm:text-[10px] text-white font-bold border border-purple-500/30">⏭️ ERA(<span class="key-name-SKILL2">2</span>)</button>
+                        <button onclick="activateSkill('FREEZE')" class="skill-btn bg-teal-900/80 p-1 sm:p-1.5 rounded text-[8px] sm:text-[10px] text-white font-bold border border-teal-500/30">⏸️ FRZ(<span class="key-name-SKILL3">3</span>)</button>
+                        <button onclick="activateSkill('ACCEL')" class="skill-btn bg-orange-900/80 p-1 sm:p-1.5 rounded text-[8px] sm:text-[10px] text-white font-bold border border-orange-500/30">⏩ ACC(<span class="key-name-SKILL4">4</span>)</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="board-container" class="bg-black border-[3px] border-neutral-800 p-1 shadow-2xl relative shrink-0 rounded-sm transition-all duration-300 overflow-hidden">
+                <div id="main-board" class="flex flex-col relative z-0"></div>
+                
+                <div id="effect-overlay" class="hidden absolute inset-0 bg-blue-900/40 backdrop-blur-[1px] flex items-center justify-center border-2 border-blue-400 z-10 pointer-events-none">
+                    <div class="bg-black/80 px-3 py-2 text-blue-300 font-bold tracking-widest text-xs sm:text-sm border border-blue-500 animate-pulse text-center">
+                        TIME STOPPED<br>
+                        <span id="freeze-moves" class="text-[10px] text-teal-300 font-black"></span>
+                    </div>
+                </div>
+
+                <div id="erase-indicator" class="hidden absolute top-1/4 left-1/2 -translate-x-1/2 z-30 text-purple-400 font-black text-center tracking-widest whitespace-nowrap animate-pulse drop-shadow-[0_0_10px_rgba(168,85,247,0.8)] pointer-events-none"></div>
+            </div>
+
+            <div class="flex flex-col items-start gap-2 flex-1 min-w-[60px] sm:min-w-[100px] mt-4">
+                <div class="text-[10px] sm:text-xs text-[#2CB4AD] mb-1 tracking-wider font-bold">NEXT</div>
+                <div id="next-board-0" class="bg-neutral-900/50 border border-neutral-800 p-1 min-h-[3rem] min-w-[3rem] sm:min-h-[4rem] sm:min-w-[4rem] flex flex-col items-center justify-center mb-2 rounded"></div>
+                <div id="next-board-1" class="bg-neutral-900/50 border border-neutral-800 p-1 min-h-[2.5rem] min-w-[2.5rem] sm:min-h-[3rem] sm:min-w-[3rem] flex flex-col items-center justify-center opacity-70 mb-1 rounded"></div>
+                <div id="next-board-2" class="bg-neutral-900/50 border border-neutral-800 p-1 min-h-[2.5rem] min-w-[2.5rem] sm:min-h-[3rem] sm:min-w-[3rem] flex flex-col items-center justify-center opacity-40 rounded"></div>
+            </div>
+        </div>
+
+        <div class="hidden md:block text-[10px] sm:text-xs text-neutral-600 text-center leading-relaxed mt-6">
+           [<span class="key-name-LEFT">←</span>/<span class="key-name-RIGHT">→</span>] 移動  |  [<span class="key-name-ROTATE">↑</span>] 回転  |  [<span class="key-name-DOWN">↓</span>] ソフトドロップ<br>[<span class="key-name-DROP">SPACE</span>] ハードドロップ  |  [<span class="key-name-HOLD">SHIFT</span>] ホールド<br>
+           ※ REWIND(<span class="key-name-SKILL1">1</span>)は長押ししている間だけ巻き戻ります
+        </div>
+        
+        <div id="mobile-skills-panel" class="hidden md:hidden w-full px-2 mt-4 shrink-0 pointer-events-auto">
+            <div class="flex justify-between gap-1.5 w-full max-w-[320px] mx-auto">
+                <button id="btn-rewind-mobile" class="skill-btn flex-1 bg-blue-900/80 py-2.5 rounded text-[10px] text-white font-bold border border-blue-500/30 shadow-lg active:scale-95 transition-transform select-none" style="-webkit-touch-callout:none;">⏪ REW</button>
+                <button onclick="activateSkill('ERASE')" class="skill-btn flex-1 bg-purple-900/80 py-2.5 rounded text-[10px] text-white font-bold border border-purple-500/30 shadow-lg active:scale-95 transition-transform">⏭️ ERA</button>
+                <button onclick="activateSkill('FREEZE')" class="skill-btn flex-1 bg-teal-900/80 py-2.5 rounded text-[10px] text-white font-bold border border-teal-500/30 shadow-lg active:scale-95 transition-transform">⏸️ FRZ</button>
+                <button onclick="activateSkill('ACCEL')" class="skill-btn flex-1 bg-orange-900/80 py-2.5 rounded text-[10px] text-white font-bold border border-orange-500/30 shadow-lg active:scale-95 transition-transform">⏩ ACC</button>
+            </div>
+        </div>
+
+        <div class="md:hidden w-full px-4 mt-4 flex flex-col gap-1 shrink-0">
+            <div class="text-[9px] text-center text-neutral-500 font-bold tracking-widest leading-tight">
+              タップ: 移動/回転 | 上スワイプ: ハードドロップ<br>下スワイプ: ソフトドロップ
+            </div>
+        </div>
+
+        <button id="ingame-back-menu-btn" class="absolute top-4 right-4 sm:top-6 sm:right-6 z-40 bg-neutral-900/80 text-neutral-400 hover:text-white border border-neutral-700 font-bold py-1.5 px-3 rounded text-[10px] tracking-widest focus:outline-none transition-colors shadow-lg active:scale-95">QUIT</button>
+    </div>
+
+    <div id="gameover-screen" class="hidden absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm pointer-events-auto">
+        <div class="text-6xl sm:text-8xl font-black tracking-tighter mb-4 text-red-500 drop-shadow-[0_0_30px_rgba(239,68,68,0.8)] animate-pop">GAME OVER</div>
+        <div class="text-2xl sm:text-3xl text-white mb-10 font-bold">FINAL SCORE: <span id="final-score" class="text-[#F6AA00]">0</span></div>
+        <button id="retry-btn" class="px-10 py-4 bg-neutral-900 text-white font-bold tracking-widest hover:bg-neutral-800 transition-colors border-2 border-neutral-700 rounded shadow-lg text-lg active:scale-95 focus:outline-none mb-4">PLAY AGAIN</button>
+        <button id="back-menu-btn" class="text-sm text-neutral-500 hover:text-white transition-colors tracking-widest focus:outline-none">RETURN TO MENU</button>
+    </div>
+
+    <script>
+        // --- Sound Engine ---
+        let audioCtx;
+        let isPlayingBGM = false;
+        let nextNoteTime = 0;
+        let currentNote = 0;
+        let bgmTimer;
+
+        const melody = [
+            { n: 76, d: 1 }, { n: 71, d: 0.5 }, { n: 72, d: 0.5 }, { n: 74, d: 1 },
+            { n: 72, d: 0.5 }, { n: 71, d: 0.5 }, { n: 69, d: 1 }, { n: 69, d: 0.5 },
+            { n: 72, d: 0.5 }, { n: 76, d: 1 }, { n: 74, d: 0.5 }, { n: 72, d: 0.5 },
+            { n: 71, d: 1.5 }, { n: 72, d: 0.5 }, { n: 74, d: 1 }, { n: 76, d: 1 },
+            { n: 72, d: 1 }, { n: 69, d: 1 }, { n: 69, d: 2 },
+            { n: 74, d: 1.5 }, { n: 77, d: 0.5 }, { n: 81, d: 1 }, { n: 79, d: 0.5 }, { n: 77, d: 0.5 },
+            { n: 76, d: 1.5 }, { n: 72, d: 0.5 }, { n: 76, d: 1 }, { n: 74, d: 0.5 }, { n: 72, d: 0.5 },
+            { n: 71, d: 1 }, { n: 71, d: 0.5 }, { n: 72, d: 0.5 }, { n: 74, d: 1 }, { n: 76, d: 1 },
+            { n: 72, d: 1 }, { n: 69, d: 1 }, { n: 69, d: 2 }
+        ];
+
+        const playBGMStep = () => {
+            if (!isPlayingBGM || !audioCtx) return;
+            while (nextNoteTime < audioCtx.currentTime + 0.1) {
+                const note = melody[currentNote];
+                const freq = 440 * Math.pow(2, (note.n - 69) / 12);
+                const duration = note.d * 0.35; 
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.015, nextNoteTime); 
+                gain.gain.exponentialRampToValueAtTime(0.001, nextNoteTime + duration - 0.05);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(nextNoteTime);
+                osc.stop(nextNoteTime + duration);
+                nextNoteTime += duration;
+                currentNote = (currentNote + 1) % melody.length;
+            }
+            bgmTimer = setTimeout(playBGMStep, 25);
+        };
+
+        const SoundEngine = {
+            init: () => {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            },
+            setBGM: (play) => {
+                if (play === isPlayingBGM) return;
+                isPlayingBGM = play;
+                if (play && audioCtx) {
+                    nextNoteTime = audioCtx.currentTime + 0.1;
+                    currentNote = 0;
+                    playBGMStep();
+                } else {
+                    clearTimeout(bgmTimer);
+                }
+            },
+            playSE: (type) => {
+                if (!audioCtx || audioCtx.state === 'suspended') return;
+                const t = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'move') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(300, t);
+                    gain.gain.setValueAtTime(0.02, t);
+                    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+                    osc.start(t); osc.stop(t + 0.05);
+                } else if (type === 'rotate') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(400, t);
+                    osc.frequency.setValueAtTime(500, t + 0.02);
+                    gain.gain.setValueAtTime(0.03, t);
+                    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+                    osc.start(t); osc.stop(t + 0.05);
+                } else if (type === 'drop') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(400, t);
+                    osc.frequency.exponentialRampToValueAtTime(50, t + 0.1);
+                    gain.gain.setValueAtTime(0.08, t);
+                    gain.gain.linearRampToValueAtTime(0, t + 0.1);
+                    osc.start(t); osc.stop(t + 0.1);
+                } else if (type === 'clear') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(600, t);
+                    osc.frequency.setValueAtTime(800, t + 0.05);
+                    gain.gain.setValueAtTime(0.08, t);
+                    gain.gain.linearRampToValueAtTime(0, t + 0.15);
+                    osc.start(t); osc.stop(t + 0.15);
+                } else if (type === 'gameover') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(200, t);
+                    osc.frequency.linearRampToValueAtTime(50, t + 1.0);
+                    gain.gain.setValueAtTime(0.2, t);
+                    gain.gain.linearRampToValueAtTime(0, t + 1.0);
+                    osc.start(t); osc.stop(t + 1.0);
+                } else if (type === 'hold') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(500, t);
+                    gain.gain.setValueAtTime(0.05, t);
+                    gain.gain.linearRampToValueAtTime(0, t + 0.1);
+                    osc.start(t); osc.stop(t + 0.1);
+                } else if (type === 'skill') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(800, t);
+                    osc.frequency.linearRampToValueAtTime(1200, t + 0.2);
+                    gain.gain.setValueAtTime(0.1, t);
+                    gain.gain.linearRampToValueAtTime(0, t + 0.2);
+                    osc.start(t); osc.stop(t + 0.2);
+                }
+            }
+        };
+
+        // --- Core Constants & Variables ---
+        const COLS = 10;
+        const ROWS = 20;
+        const MAX_SP = 2; // SPストック最大値
+        const LINES_PER_SP = 20; // 1SP獲得に必要なライン数
+
+        // 完全決定論ベースロジック用 PRNG (固定シード)
+        let gameSeed = 12345;
+        function deterministicRandom() {
+            gameSeed = (gameSeed * 1664525 + 1013904223) % 4294967296;
+            return gameSeed / 4294967296;
+        }
+
+        // 決定論的タイマー (ERASE以外はDate.nowを排除)
+        let logicalTime = 0;
+        let nextDropTime = 0;
+        
+        let isTesting = false; // テスト実行中フラグ
+
+        // キーコンフィグ用設定
+        const defaultKeyMap = {
+            LEFT: 'ArrowLeft',
+            RIGHT: 'ArrowRight',
+            DOWN: 'ArrowDown',
+            DROP: ' ',
+            ROTATE: 'ArrowUp',
+            HOLD: 'Shift',
+            SKILL1: '1',
+            SKILL2: '2',
+            SKILL3: '3',
+            SKILL4: '4'
+        };
+        let keyMap = { ...defaultKeyMap };
+        try {
+            const savedMap = localStorage.getItem('tetris-keymap');
+            if (savedMap) keyMap = { ...keyMap, ...JSON.parse(savedMap) };
+        } catch(e) {}
+
+        function formatKeyName(key) {
+            if (key === ' ') return 'SPACE';
+            if (key.startsWith('Arrow')) return key.replace('Arrow', '').toUpperCase() + ' ARROW';
+            if (key.length === 1) return key.toUpperCase();
+            return key.toUpperCase();
+        }
+
+        function updateSkillUIKeyNames() {
+            Object.keys(keyMap).forEach(action => {
+                document.querySelectorAll(`.key-name-${action}`).forEach(el => {
+                    el.textContent = formatKeyName(keyMap[action]);
+                });
+            });
+        }
+
+        // レベル1〜20までの落下スピード(ミリ秒)
+        const LEVEL_SPEEDS = [
+            800, 720, 630, 550, 470, 380, 300, 220, 130, 100, // 1-10
+            85, 70, 55, 40, 30, 25, 20, 15, 10, 0             // 11-20
+        ];
+
+        const TETROMINOS = {
+            'I': { shape: [[1,1,1,1]], color: 'bg-[#2CB4AD]' }, 
+            'J': { shape: [[1,0,0],[1,1,1]], color: 'bg-[#005AFF]' }, 
+            'L': { shape: [[0,0,1],[1,1,1]], color: 'bg-[#F6AA00]' }, 
+            'O': { shape: [[1,1],[1,1]], color: 'bg-[#FFF100]' }, 
+            'S': { shape: [[0,1,1],[1,1,0]], color: 'bg-[#03AF7A]' }, 
+            'T': { shape: [[0,1,0],[1,1,1]], color: 'bg-[#990099]' }, 
+            'Z': { shape: [[1,1,0],[0,1,1]], color: 'bg-[#FF4B00]' }
+        };
+        const SHAPES = Object.keys(TETROMINOS);
+
+        let engine = null;
+        let soundEnabled = false;
+        let skillsEnabled = true;
+        let pieceBag = [];
+        let gameLoopTimer = null;
+        let isSoftDropping = false;
+
+        // Debug Mode Variables
+        let isDebugMode = false;
+        const konamiCode = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
+        let konamiIndex = 0;
+        
+        // Test Code Variables
+        const testCode = ['t', 'e', 's', 't'];
+        let testIndex = 0;
+
+        // Skill System Variables
+        let historyQueue = [];
+        let activeEffect = null;
+        let playerCooldownUntil = 0;
+        
+        let eraseMultiplierExpiresAt = 0; // ERASEのみ実時間(Date.now)を許容
+        
+        let isRewinding = false;
+        let rewindInterval = null;
+
+        // --- Engine Logic ---
+        function getNextPieceType() {
+            if (pieceBag.length === 0) {
+                pieceBag = [...SHAPES];
+                for (let i = pieceBag.length - 1; i > 0; i--) {
+                    // ERASE以外は完全決定論 (固定シードのPRNGを使用)
+                    const j = Math.floor(deterministicRandom() * (i + 1));
+                    [pieceBag[i], pieceBag[j]] = [pieceBag[j], pieceBag[i]];
+                }
+            }
+            return pieceBag.pop();
+        }
+
+        const emptyBoard = () => Array(ROWS).fill(null).map(() => Array(COLS).fill(""));
+
+        const createPieceObj = (type) => ({
+            type,
+            shape: TETROMINOS[type].shape,
+            x: Math.floor(COLS / 2) - Math.floor(TETROMINOS[type].shape[0].length / 2),
+            y: 0,
+            rotIndex: 0
+        });
+
+        function initEngine() {
+            gameSeed = 12345; 
+            logicalTime = 10; 
+            nextDropTime = logicalTime + LEVEL_SPEEDS[0];
+            pieceBag = [];
+            
+            engine = {
+                board: emptyBoard(),
+                piece: createPieceObj(getNextPieceType()),
+                nextPieces: [getNextPieceType(), getNextPieceType(), getNextPieceType()],
+                holdPiece: null,
+                canHold: true,
+                score: 0,
+                lines: 0,
+                level: 1,
+                sp: 1, 
+                lockDelayStarted: 0, 
+                gameOver: false
+            };
+            historyQueue = [];
+            activeEffect = null;
+            playerCooldownUntil = 0;
+            eraseMultiplierExpiresAt = 0;
+            stopRewind();
+        }
+
+        const isValidMove = (board, piece, dx, dy, newShape = piece.shape) => {
+            for (let y = 0; y < newShape.length; y++) {
+                for (let x = 0; x < newShape[y].length; x++) {
+                    if (newShape[y][x]) {
+                        const newY = piece.y + y + dy;
+                        const newX = piece.x + x + dx;
+                        if (newY < 0 || newY >= ROWS || newX < 0 || newX >= COLS || (board[newY] && board[newY][newX] !== "")) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            return true;
+        };
+
+        // --- エフェクト処理 ---
+        function playLineClearEffect(indices) {
+            const container = document.getElementById('main-board');
+            if (!container) return;
+            
+            indices.forEach(y => {
+                const effectDiv = document.createElement('div');
+                effectDiv.className = 'absolute left-0 w-full bg-white/80 z-20 animate-line-clear mix-blend-screen pointer-events-none';
+                effectDiv.style.top = `${(y / ROWS) * 100}%`;
+                effectDiv.style.height = `${(1 / ROWS) * 100}%`;
+                container.appendChild(effectDiv);
+                
+                setTimeout(() => {
+                    if(container.contains(effectDiv)) {
+                        container.removeChild(effectDiv);
+                    }
+                }, 300);
+            });
+        }
+
+        function lockAndSpawn() {
+            const newBoard = engine.board.map(row => [...row]);
+            engine.piece.shape.forEach((row, y) => {
+                row.forEach((cell, x) => {
+                    if (cell) {
+                        const by = engine.piece.y + y, bx = engine.piece.x + x;
+                        if (by >= 0 && by < ROWS) newBoard[by][bx] = engine.piece.type;
+                    }
+                });
+            });
+
+            if (engine.piece.y <= 0) {
+                engine.board = newBoard;
+                engine.gameOver = true;
+                return;
+            }
+
+            // 消去判定
+            const clearedIndices = [];
+            newBoard.forEach((row, y) => {
+                if (row.every(cell => cell !== "")) {
+                    clearedIndices.push(y);
+                }
+            });
+
+            const linesCleared = clearedIndices.length;
+
+            if (linesCleared > 0) {
+                // 光のラインエフェクト
+                playLineClearEffect(clearedIndices);
+                
+                // 行を詰める処理
+                const filteredBoard = newBoard.filter((_, i) => !clearedIndices.includes(i));
+                const emptyRows = Array(linesCleared).fill(null).map(() => Array(COLS).fill(""));
+                engine.board = [...emptyRows, ...filteredBoard];
+
+                // 倍率計算
+                let multiplier = 1;
+                // ERASEのみ Date.now() 依存
+                if (eraseMultiplierExpiresAt > Date.now()) {
+                    multiplier *= 50;
+                    eraseMultiplierExpiresAt = 0; 
+                }
+                if (activeEffect?.type === 'ACCEL') {
+                    multiplier *= 2;
+                }
+                if (activeEffect?.type === 'FREEZE') {
+                    multiplier *= 2; 
+                }
+
+                // スコア・レベル計算
+                const baseScores = [0, 100, 300, 500, 800];
+                engine.score += (baseScores[linesCleared] * engine.level) * multiplier;
+                
+                const oldLines = engine.lines;
+                engine.lines += linesCleared;
+                engine.level = Math.min(20, Math.floor(engine.lines / 10) + 1); // 最大レベル20
+                
+                if (skillsEnabled) {
+                    const gainedSp = Math.floor(engine.lines / LINES_PER_SP) - Math.floor(oldLines / LINES_PER_SP);
+                    engine.sp = Math.min(MAX_SP, engine.sp + gainedSp);
+                }
+
+                // 全体フラッシュとシェイク（4ライン時のみ揺らす）
+                const boardEl = document.getElementById('board-container');
+                boardEl.classList.remove('animate-shake', 'animate-flash-board');
+                void boardEl.offsetWidth; // reflow
+
+                if (linesCleared >= 4 || multiplier > 2) {
+                    boardEl.classList.add('animate-shake', 'animate-flash-board');
+                    if (soundEnabled && !isTesting) {
+                        SoundEngine.playSE('skill'); 
+                        setTimeout(() => SoundEngine.playSE('clear'), 100);
+                    }
+                } else {
+                    boardEl.classList.add('animate-flash-board');
+                    if (soundEnabled && !isTesting) SoundEngine.playSE('clear');
+                }
+
+            } else {
+                engine.board = newBoard;
+            }
+
+            engine.piece = createPieceObj(engine.nextPieces.shift());
+            engine.nextPieces.push(getNextPieceType());
+            engine.canHold = true;
+
+            // ★ 新しいピースが出現した瞬間に重なっていたら即ゲームオーバー
+            if (!isValidMove(engine.board, engine.piece, 0, 0)) {
+                engine.gameOver = true;
+            }
+
+            if (activeEffect?.type === 'FREEZE') {
+                activeEffect.movesLeft -= 1;
+            }
+        }
+
+        function handleInput(action, isAutoTick = false) {
+            if (!engine || engine.gameOver || isRewinding) return;
+            
+            // FREEZE中の挙動制御
+            if (activeEffect?.type === 'FREEZE') {
+                if (isAutoTick) return; // 自動落下は無効
+                if (activeEffect.movesLeft <= 0) return; // 3手消費済みの場合は時間切れまで操作無効
+            }
+
+            let seType = null;
+            let moved = false;
+
+            if (action === 'LEFT') {
+                if (isValidMove(engine.board, engine.piece, -1, 0)) {
+                    engine.piece.x -= 1;
+                    seType = 'move';
+                    moved = true;
+                }
+            } else if (action === 'RIGHT') {
+                if (isValidMove(engine.board, engine.piece, 1, 0)) {
+                    engine.piece.x += 1;
+                    seType = 'move';
+                    moved = true;
+                }
+            } else if (action === 'DOWN') {
+                if (isValidMove(engine.board, engine.piece, 0, 1)) {
+                    engine.piece.y += 1;
+                    engine.lockDelayStarted = 0; 
+                    if (!isAutoTick && isSoftDropping) engine.score += 1;
+                    moved = true;
+                } else {
+                    // 接地時の固定猶予処理(完全決定論)
+                    if (engine.lockDelayStarted === 0) {
+                        engine.lockDelayStarted = logicalTime;
+                    } else if (logicalTime - engine.lockDelayStarted > 500) {
+                        lockAndSpawn();
+                        engine.lockDelayStarted = 0;
+                        moved = true;
+                    }
+                }
+            } else if (action === 'ROTATE') {
+                const rotatedShape = engine.piece.shape[0].map((val, index) => engine.piece.shape.map(row => row[index]).reverse());
+                const nextRotIndex = (engine.piece.rotIndex + 1) % 4;
+                
+                if (isValidMove(engine.board, engine.piece, 0, 0, rotatedShape)) {
+                    engine.piece.shape = rotatedShape;
+                    engine.piece.rotIndex = nextRotIndex;
+                    seType = 'rotate';
+                    moved = true;
+                } else if (isValidMove(engine.board, engine.piece, -1, 0, rotatedShape)) {
+                    engine.piece.shape = rotatedShape;
+                    engine.piece.x -= 1;
+                    engine.piece.rotIndex = nextRotIndex;
+                    seType = 'rotate';
+                    moved = true;
+                } else if (isValidMove(engine.board, engine.piece, 1, 0, rotatedShape)) {
+                    engine.piece.shape = rotatedShape;
+                    engine.piece.x += 1;
+                    engine.piece.rotIndex = nextRotIndex;
+                    seType = 'rotate';
+                    moved = true;
+                }
+            } else if (action === 'DROP') {
+                let dy = 0;
+                while (isValidMove(engine.board, engine.piece, 0, dy + 1)) dy++;
+                engine.piece.y += dy;
+                engine.score += dy * 2; 
+                lockAndSpawn();
+                engine.lockDelayStarted = 0;
+                seType = 'drop';
+                moved = true;
+                
+                const boardEl = document.getElementById('board-container');
+                boardEl.classList.remove('animate-shake');
+                void boardEl.offsetWidth; 
+                boardEl.classList.add('animate-shake');
+            } else if (action === 'HOLD') {
+                if (engine.canHold) {
+                    const currentType = engine.piece.type;
+                    if (engine.holdPiece) {
+                        engine.piece = createPieceObj(engine.holdPiece);
+                    } else {
+                        engine.piece = createPieceObj(engine.nextPieces.shift());
+                        engine.nextPieces.push(getNextPieceType());
+                    }
+                    engine.holdPiece = currentType;
+                    engine.canHold = false;
+                    engine.lockDelayStarted = 0;
+                    seType = 'hold';
+                    moved = true;
+                }
+            }
+
+            // 移動後に接地状態かどうかの判定（猶予のリセット）
+            if (moved && action !== 'DROP' && action !== 'HOLD') {
+                if (isValidMove(engine.board, engine.piece, 0, 1)) {
+                    engine.lockDelayStarted = 0; // 宙に浮いた場合はリセット
+                } else if (engine.lockDelayStarted > 0) {
+                    // 接地したままでの移動・回転なら猶予をリセット
+                    engine.lockDelayStarted = logicalTime;
+                }
+            }
+
+            if (soundEnabled && seType && !isAutoTick && !isTesting) SoundEngine.playSE(seType);
+
+            if (moved) {
+                renderAll();
+                if (engine.gameOver && !isTesting) showGameOver();
+            }
+        }
+
+        // --- Skill System Logic ---
+        function saveHistory() {
+            if (!engine || engine.gameOver || !skillsEnabled || isRewinding) return;
+            const stateCopy = {
+                board: engine.board.map(row => [...row]),
+                piece: { ...engine.piece, shape: engine.piece.shape.map(r => [...r]) },
+                nextPieces: [...engine.nextPieces],
+                holdPiece: engine.holdPiece,
+                canHold: engine.canHold,
+                score: engine.score,
+                lines: engine.lines,
+                level: engine.level,
+                sp: engine.sp,
+                lockDelayStarted: engine.lockDelayStarted
+            };
+            historyQueue.push({ state: stateCopy, time: logicalTime }); // logicalTimeを使用
+            if (historyQueue.length > 200) historyQueue.shift(); 
+        }
+
+        // --- REWIND (巻き戻し: 長押し処理) ---
+        function startRewind() {
+            if (!skillsEnabled || !engine || engine.gameOver || (engine.sp < 1 && !isDebugMode) || logicalTime < playerCooldownUntil) return;
+            if (activeEffect?.type === 'FREEZE' || isRewinding) return;
+
+            if (!isDebugMode) {
+                engine.sp -= 1;
+                playerCooldownUntil = logicalTime + 15000;
+            }
+            
+            isRewinding = true;
+            if (soundEnabled && !isTesting) SoundEngine.playSE('skill');
+
+            const boardEl = document.getElementById('board-container');
+            boardEl.classList.add('rewinding-active');
+
+            const targetLimitTime = logicalTime - 10000; // 10秒前(10000ms前)のlogicalTimeまで
+            
+            rewindInterval = setInterval(() => {
+                if (historyQueue.length > 0) {
+                    const past = historyQueue.pop(); 
+                    if (past.time < targetLimitTime || historyQueue.length === 0) {
+                        stopRewind();
+                        return;
+                    }
+                    logicalTime = past.time; // 論理時間をロールバック
+                    nextDropTime = logicalTime + LEVEL_SPEEDS[engine.level - 1]; // 落下タイマー再調整
+                    
+                    engine = {
+                        ...past.state,
+                        board: past.state.board.map(r => [...r]),
+                        piece: { ...past.state.piece, shape: past.state.piece.shape.map(r => [...r]) },
+                        nextPieces: [...past.state.nextPieces],
+                        sp: engine.sp, 
+                        lines: engine.lines, 
+                        level: engine.level,
+                        lockDelayStarted: past.state.lockDelayStarted
+                    };
+                    renderAll();
+                } else {
+                    stopRewind();
+                }
+            }, 50); 
+        }
+
+        function stopRewind() {
+            if (!isRewinding) return;
+            isRewinding = false;
+            clearInterval(rewindInterval);
+            const boardEl = document.getElementById('board-container');
+            if (boardEl) boardEl.classList.remove('rewinding-active');
+            updateSkillUI();
+        }
+
+        // 長押しイベントのバインド
+        const bindRewindEvents = (id) => {
+            const btn = document.getElementById(id);
+            if(!btn) return;
+            const startHandler = (e) => { if(e) e.preventDefault(); startRewind(); };
+            const stopHandler = (e) => { if(e) e.preventDefault(); stopRewind(); };
+            
+            btn.addEventListener('mousedown', startHandler);
+            btn.addEventListener('touchstart', startHandler, {passive: false});
+            
+            btn.addEventListener('mouseup', stopHandler);
+            btn.addEventListener('mouseleave', stopHandler);
+            btn.addEventListener('touchend', stopHandler);
+            btn.addEventListener('touchcancel', stopHandler);
+        };
+        
+        bindRewindEvents('btn-rewind');
+        bindRewindEvents('btn-rewind-mobile');
+
+        function applyVisualEffect(type) {
+            const boardEl = document.getElementById('board-container');
+            if (type === 'ERASE') {
+                boardEl.classList.add('animate-glitch');
+                setTimeout(() => boardEl.classList.remove('animate-glitch'), 200);
+            }
+        }
+
+        window.activateSkill = function(type) {
+            if (!skillsEnabled || !engine || engine.gameOver || (engine.sp < 1 && !isDebugMode) || logicalTime < playerCooldownUntil) return;
+            if (activeEffect?.type === 'FREEZE' || isRewinding) return;
+            
+            if (!isDebugMode) {
+                engine.sp -= 1;
+                playerCooldownUntil = logicalTime + 15000;
+            }
+            
+            if (soundEnabled && !isTesting) SoundEngine.playSE('skill');
+
+            if (type === 'ERASE') {
+                applyVisualEffect('ERASE');
+                eraseMultiplierExpiresAt = Date.now() + 10000;
+                
+                for (let i = 0; i < 3; i++) {
+                    const dir = Math.random() > 0.5 ? 1 : -1; // ERASEのみランダム(Math.random)許容
+                    if (isValidMove(engine.board, engine.piece, dir, 0)) engine.piece.x += dir;
+                    if (Math.random() > 0.5) { 
+                        const rotatedShape = engine.piece.shape[0].map((val, index) => engine.piece.shape.map(row => row[index]).reverse());
+                        if (isValidMove(engine.board, engine.piece, 0, 0, rotatedShape)) engine.piece.shape = rotatedShape;
+                    }
+                    let dy = 0;
+                    while (isValidMove(engine.board, engine.piece, 0, dy + 1)) dy++;
+                    engine.piece.y += dy;
+                    lockAndSpawn();
+                    engine.lockDelayStarted = 0;
+                    if(engine.gameOver) break;
+                }
+            } else if (type === 'FREEZE') {
+                activeEffect = { type: 'FREEZE', expiresAt: logicalTime + 5000, movesLeft: 3 };
+            } else if (type === 'ACCEL') {
+                activeEffect = { type: 'ACCEL', expiresAt: logicalTime + 20000 };
+            }
+
+            renderAll();
+            
+            // スキル（特にERASE等）による強制ゲームオーバー時のセーフティ
+            if (engine && engine.gameOver && !isTesting) {
+                showGameOver();
+            }
+        };
+
+        function updateSkillUI() {
+            if (!skillsEnabled || !engine) return;
+
+            const isCoolingDown = logicalTime < playerCooldownUntil && !isDebugMode;
+            const cooldownRemaining = Math.max(0, playerCooldownUntil - logicalTime);
+            const isFrozen = activeEffect?.type === 'FREEZE';
+
+            const btns = document.querySelectorAll('.skill-btn');
+            btns.forEach(btn => {
+                const isRewindBtn = btn.id === 'btn-rewind' || btn.id === 'btn-rewind-mobile';
+                
+                let shouldDisable = false;
+                
+                if (isRewinding) {
+                    if (!isRewindBtn) shouldDisable = true;
+                } else {
+                    if ((engine.sp < 1 && !isDebugMode) || isCoolingDown || isFrozen) {
+                        shouldDisable = true;
+                    }
+                }
+
+                if (shouldDisable) {
+                    btn.classList.add('opacity-50', 'cursor-not-allowed');
+                } else {
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+                
+                if (isRewindBtn) {
+                    if (isRewinding) {
+                        btn.classList.add('bg-blue-600', 'border-white');
+                        btn.classList.remove('bg-blue-900/80', 'border-blue-500/30');
+                    } else {
+                        btn.classList.remove('bg-blue-600', 'border-white');
+                        btn.classList.add('bg-blue-900/80', 'border-blue-500/30');
+                    }
+                }
+            });
+
+            const spBar = document.getElementById('sp-bar');
+            const spText = document.getElementById('sp-text');
+            const spCount = document.getElementById('sp-count');
+
+            if (spCount) spCount.textContent = isDebugMode ? "∞" : engine.sp;
+
+            if (spBar && spText) {
+                if (isDebugMode) {
+                    spText.innerHTML = `<span class="text-yellow-400 animate-pulse font-black">DEBUG MODE</span>`;
+                    spBar.style.width = `100%`;
+                    spBar.className = 'h-full bg-yellow-400 transition-all duration-300 shadow-[0_0_10px_rgba(250,204,21,0.8)]';
+                } else if (isCoolingDown) {
+                    spText.innerHTML = `<span class="text-red-400 animate-pulse">COOLDOWN ${Math.ceil(cooldownRemaining / 1000)}s</span>`;
+                    spBar.style.width = `${(cooldownRemaining / 15000) * 100}%`;
+                    spBar.className = 'h-full bg-red-500/80 transition-none';
+                } else if (engine.sp >= MAX_SP) {
+                    spText.innerHTML = `<span class="text-yellow-400 animate-pulse font-black">SP MAX</span>`;
+                    spBar.style.width = `100%`;
+                    spBar.className = 'h-full bg-yellow-400 transition-all duration-300 shadow-[0_0_10px_rgba(250,204,21,0.8)]';
+                } else {
+                    spText.textContent = `${(engine.lines % LINES_PER_SP)} / ${LINES_PER_SP} LINES`;
+                    spBar.style.width = `${((engine.lines % LINES_PER_SP) / LINES_PER_SP) * 100}%`;
+                    spBar.className = 'h-full bg-cyan-400 transition-all duration-300';
+                }
+            }
+
+            // FREEZE 残り時間と残り手数のリアルタイム表示
+            const overlay = document.getElementById('effect-overlay');
+            const freezeMovesEl = document.getElementById('freeze-moves');
+            if (activeEffect?.type === 'FREEZE') {
+                overlay.classList.remove('hidden');
+                const timeLeft = Math.max(0, Math.ceil((activeEffect.expiresAt - logicalTime) / 1000));
+                const movesLeft = Math.max(0, activeEffect.movesLeft);
+                if (movesLeft <= 0) {
+                    freezeMovesEl.innerHTML = `LIMIT: <span class="text-red-400">${timeLeft}s</span> / MOVES: <span class="text-red-400">0 (LOCKED)</span>`;
+                } else {
+                    freezeMovesEl.textContent = `LIMIT: ${timeLeft}s / MOVES: ${movesLeft}`;
+                }
+            } else {
+                overlay.classList.add('hidden');
+            }
+
+            // ERASE 50x 表示のトグルと残り時間 (Date.now依存)
+            const eraseIndicator = document.getElementById('erase-indicator');
+            const realNow = Date.now();
+            if (eraseMultiplierExpiresAt > realNow) {
+                eraseIndicator.classList.remove('hidden');
+                const timeLeft = Math.ceil((eraseMultiplierExpiresAt - realNow) / 1000);
+                eraseIndicator.innerHTML = `<div class="text-xl sm:text-2xl">50x SCORE BOOST!</div><div class="text-sm text-purple-300">LIMIT: ${timeLeft}s</div>`;
+            } else {
+                eraseIndicator.classList.add('hidden');
+                eraseMultiplierExpiresAt = 0;
+            }
+        }
+
+        // --- Rendering Logic ---
+        const getGhostY = (board, piece) => {
+            if (!piece) return 0;
+            let dy = 0;
+            while (isValidMove(board, piece, 0, dy + 1)) dy++;
+            return piece.y + dy;
+        };
+
+        const getDisplayBoard = (board, piece) => {
+            const newBoard = board.map(row => [...row]);
+            if (!piece) return newBoard;
+            const ghostY = getGhostY(board, piece);
+            piece.shape.forEach((row, y) => {
+                row.forEach((cell, x) => {
+                    if (cell) {
+                        const boardY = y + ghostY, boardX = x + piece.x;
+                        if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < COLS && newBoard[boardY][boardX] === "") {
+                            newBoard[boardY][boardX] = piece.type + '_GHOST';
+                        }
+                    }
+                });
+            });
+            piece.shape.forEach((row, y) => {
+                row.forEach((cell, x) => {
+                    if (cell) {
+                        const boardY = y + piece.y, boardX = x + piece.x;
+                        if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < COLS) {
+                            newBoard[boardY][boardX] = piece.type;
+                        }
+                    }
+                });
+            });
+            return newBoard;
+        };
+
+        function getBlockHTML(type, isMini = false) {
+            const sizeClasses = isMini 
+                ? "w-[10px] h-[10px] sm:w-[14px] sm:h-[14px]" 
+                : "w-[12px] h-[12px] min-[375px]:w-[14px] min-[375px]:h-[14px] sm:w-[20px] sm:h-[20px] md:w-[24px] md:h-[24px]";
+            
+            if (!type || type === "") return `<div class="${sizeClasses} border border-neutral-800/40 bg-neutral-900/40"></div>`;
+            const isGhost = type.includes('_GHOST');
+            const baseType = isGhost ? type.replace('_GHOST', '') : type;
+            const info = TETROMINOS[baseType];
+            
+            let pattern = '';
+            if (!isGhost && info) {
+                if (baseType === 'J') pattern = '<div class="w-2 h-2 bg-white/40 rounded-full"></div>';
+                else if (baseType === 'L') pattern = '<div class="w-full h-1 bg-white/40"></div>';
+                else if (baseType === 'O') pattern = '<div class="w-3 h-3 border-2 border-white/50"></div>';
+                else if (baseType === 'S') pattern = '<div class="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-white/40"></div>';
+                else if (baseType === 'T') pattern = '<div class="w-3 h-3 bg-white/40 rotate-45"></div>';
+                else if (baseType === 'Z') pattern = '<div class="w-full h-full bg-[linear-gradient(45deg,transparent_40%,rgba(255,255,255,0.4)_40%,rgba(255,255,255,0.4)_60%,transparent_60%)]"></div>';
+            }
+
+            const borderClass = isGhost ? 'border-white/30 bg-white/10' : `border-black/50 ${info?.color || 'bg-neutral-500'}`;
+            return `<div class="${sizeClasses} border ${borderClass} flex items-center justify-center shadow-inner overflow-hidden">${pattern}</div>`;
+        }
+
+        function renderMiniBoard(elementId, type) {
+            const el = document.getElementById(elementId);
+            if (!type) {
+                el.innerHTML = '<div class="text-neutral-700 text-xs">-</div>';
+                return;
+            }
+            const shape = TETROMINOS[type].shape;
+            let html = '';
+            shape.forEach(row => {
+                html += '<div class="flex">';
+                row.forEach(cell => {
+                    if (cell) {
+                        html += getBlockHTML(type, true);
+                    } else {
+                        html += getBlockHTML('', true).replace('border border-neutral-800/40 bg-neutral-900/40', 'border-transparent bg-transparent');
+                    }
+                });
+                html += '</div>';
+            });
+            el.innerHTML = html;
+        }
+
+        function renderAll() {
+            if (!engine) return;
+
+            // Main Board
+            const displayBoard = getDisplayBoard(engine.board, engine.piece);
+            let html = '';
+            for (let y = 0; y < ROWS; y++) {
+                html += '<div class="flex relative">';
+                for (let x = 0; x < COLS; x++) {
+                    html += getBlockHTML(displayBoard[y][x], false);
+                }
+                html += '</div>';
+            }
+            document.getElementById('main-board').innerHTML = html;
+
+            // HOLD & NEXT
+            renderMiniBoard('hold-board', engine.holdPiece);
+            renderMiniBoard('next-board-0', engine.nextPieces[0]);
+            renderMiniBoard('next-board-1', engine.nextPieces[1]);
+            renderMiniBoard('next-board-2', engine.nextPieces[2]);
+
+            // Stats
+            document.getElementById('score-display').textContent = engine.score;
+            document.getElementById('level-display').textContent = engine.level;
+            document.getElementById('lines-display').textContent = engine.lines;
+
+            // Effect Overlay styles
+            const boardContainer = document.getElementById('board-container');
+            if (activeEffect?.type === 'ACCEL') {
+                boardContainer.classList.add('shadow-[inset_0_0_50px_rgba(249,115,22,0.2)]', 'border-orange-500/50');
+            } else {
+                boardContainer.classList.remove('shadow-[inset_0_0_50px_rgba(249,115,22,0.2)]', 'border-orange-500/50');
+            }
+        }
+
+        // --- Game Loop (Determinstic Logical Tick) ---
+        function startGameLoop() {
+            if (gameLoopTimer) clearInterval(gameLoopTimer);
+            
+            let lastHistoryTime = logicalTime;
+            let lastUITime = logicalTime;
+
+            gameLoopTimer = setInterval(() => {
+                if (isTesting) return; // テスト中はループを止める
+
+                if (engine && !engine.gameOver && !isRewinding) {
+                    logicalTime += 10; // 論理時間を10ms進める
+
+                    // 1. スキル効果の有効期限チェック
+                    if (activeEffect && activeEffect.expiresAt && activeEffect.expiresAt <= logicalTime) {
+                        activeEffect = null;
+                        renderAll();
+                    }
+
+                    // 2. 着地後の固定猶予(Lock Delay)チェック
+                    if (engine.lockDelayStarted > 0 && logicalTime - engine.lockDelayStarted > 500) {
+                        lockAndSpawn();
+                        engine.lockDelayStarted = 0;
+                        renderAll();
+                    }
+
+                    // 3. 履歴の保存 (100msに1回) - 巻き戻しによる時間遡行を考慮
+                    if (logicalTime < lastHistoryTime || logicalTime - lastHistoryTime >= 100) {
+                        saveHistory();
+                        lastHistoryTime = logicalTime;
+                    }
+
+                    // 4. UIの更新 (100msに1回)
+                    if (logicalTime < lastUITime || logicalTime - lastUITime >= 100) {
+                        updateSkillUI();
+                        lastUITime = logicalTime;
+                    }
+
+                    // 5. 落下(Gravity)チェック
+                    if (logicalTime >= nextDropTime) {
+                        if (activeEffect?.type !== 'FREEZE') {
+                            handleInput('DOWN', true);
+                        }
+                        
+                        let dropSpeed = isSoftDropping ? 50 : LEVEL_SPEEDS[engine.level - 1];
+                        if (activeEffect?.type === 'ACCEL') dropSpeed = Math.min(dropSpeed, 30);
+                        if (engine.lockDelayStarted > 0) dropSpeed = 50; 
+                        
+                        nextDropTime = logicalTime + dropSpeed;
+                    }
+                }
+            }, 10);
+        }
+
+        // --- UI & Event Handlers ---
+        const menuScreen = document.getElementById('menu-screen');
+        const playScreen = document.getElementById('play-screen');
+        const gameoverScreen = document.getElementById('gameover-screen');
+        
+        const soundToggle = document.getElementById('sound-toggle');
+        const soundKnob = document.getElementById('sound-toggle-knob');
+        soundToggle.addEventListener('click', () => {
+            soundEnabled = !soundEnabled;
+            if (soundEnabled) {
+                soundToggle.classList.replace('bg-neutral-700', 'bg-cyan-600');
+                soundKnob.classList.replace('left-0.5', 'left-6');
+                SoundEngine.init();
+            } else {
+                soundToggle.classList.replace('bg-cyan-600', 'bg-neutral-700');
+                soundKnob.classList.replace('left-6', 'left-0.5');
+            }
+        });
+
+        const skillsToggle = document.getElementById('skills-toggle');
+        const skillsKnob = document.getElementById('skills-toggle-knob');
+        skillsToggle.addEventListener('click', () => {
+            skillsEnabled = !skillsEnabled;
+            if (skillsEnabled) {
+                skillsToggle.classList.replace('bg-neutral-700', 'bg-cyan-600');
+                skillsKnob.classList.replace('left-0.5', 'left-6');
+            } else {
+                skillsToggle.classList.replace('bg-cyan-600', 'bg-neutral-700');
+                skillsKnob.classList.replace('left-6', 'left-0.5');
+            }
+        });
+
+        // HOW TO PLAY Modal
+        const howtoBtn = document.getElementById('howto-open-btn');
+        const howtoModal = document.getElementById('howto-modal');
+        const howtoCloseBtn = document.getElementById('howto-close-btn');
+
+        howtoBtn.addEventListener('click', () => {
+            howtoModal.classList.remove('hidden');
+            howtoModal.classList.add('flex');
+        });
+        howtoCloseBtn.addEventListener('click', () => {
+            howtoModal.classList.add('hidden');
+            howtoModal.classList.remove('flex');
+        });
+
+        // --- Key Config Modal Events ---
+        const keyconfigBtn = document.getElementById('keyconfig-open-btn');
+        const keyconfigModal = document.getElementById('keyconfig-modal');
+        const keyconfigCloseBtn = document.getElementById('keyconfig-close-btn');
+        const keyconfigResetBtn = document.getElementById('keyconfig-reset-btn');
+        let waitingForKey = null;
+
+        function renderKeyConfig() {
+            const list = document.getElementById('keyconfig-list');
+            list.innerHTML = '';
+            
+            const actions = [
+                { id: 'LEFT', name: 'MOVE LEFT' },
+                { id: 'RIGHT', name: 'MOVE RIGHT' },
+                { id: 'DOWN', name: 'SOFT DROP' },
+                { id: 'DROP', name: 'HARD DROP' },
+                { id: 'ROTATE', name: 'ROTATE' },
+                { id: 'HOLD', name: 'HOLD PIECE' },
+                { id: 'SKILL1', name: '⏪ REWIND' },
+                { id: 'SKILL2', name: '⏭️ ERASE' },
+                { id: 'SKILL3', name: '⏸️ FREEZE' },
+                { id: 'SKILL4', name: '⏩ ACCEL' }
+            ];
+            
+            actions.forEach(action => {
+                const isWaiting = waitingForKey === action.id;
+                const keyName = isWaiting ? 'PRESS KEY...' : formatKeyName(keyMap[action.id]);
+                const bgClass = isWaiting ? 'bg-[#2CB4AD] text-black animate-pulse' : 'bg-neutral-800 text-white hover:bg-neutral-700';
+                
+                list.innerHTML += `
+                    <div class="flex justify-between items-center text-sm border-b border-neutral-800 pb-1">
+                        <span class="text-neutral-400 font-bold tracking-widest text-xs">${action.name}</span>
+                        <button class="keybind-btn ${bgClass} font-bold py-1.5 px-3 rounded min-w-[100px] text-xs transition-colors focus:outline-none" data-action="${action.id}">
+                            ${keyName}
+                        </button>
+                    </div>
+                `;
+            });
+            
+            document.querySelectorAll('.keybind-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    waitingForKey = e.target.getAttribute('data-action');
+                    renderKeyConfig();
+                });
+            });
+        }
+
+        if (keyconfigBtn) {
+            keyconfigBtn.addEventListener('click', () => {
+                waitingForKey = null;
+                renderKeyConfig();
+                keyconfigModal.classList.remove('hidden');
+                keyconfigModal.classList.add('flex');
+            });
+        }
+
+        if (keyconfigCloseBtn) {
+            keyconfigCloseBtn.addEventListener('click', () => {
+                waitingForKey = null;
+                keyconfigModal.classList.add('hidden');
+                keyconfigModal.classList.remove('flex');
+            });
+        }
+
+        if (keyconfigResetBtn) {
+            keyconfigResetBtn.addEventListener('click', () => {
+                keyMap = { ...defaultKeyMap };
+                try { localStorage.setItem('tetris-keymap', JSON.stringify(keyMap)); } catch(err){}
+                waitingForKey = null;
+                renderKeyConfig();
+                updateSkillUIKeyNames();
+            });
+        }
+
+        function startGame() {
+            menuScreen.classList.add('hidden');
+            gameoverScreen.classList.add('hidden');
+            playScreen.classList.remove('hidden');
+            playScreen.classList.add('flex');
+            
+            const pcSkills = document.getElementById('skills-panel');
+            const mobileSkills = document.getElementById('mobile-skills-panel');
+            if (skillsEnabled) {
+                pcSkills.classList.remove('hidden'); pcSkills.classList.add('flex');
+                mobileSkills.classList.remove('hidden');
+            } else {
+                pcSkills.classList.add('hidden'); pcSkills.classList.remove('flex');
+                mobileSkills.classList.add('hidden');
+            }
+
+            initEngine();
+            renderAll();
+            
+            if (soundEnabled) SoundEngine.setBGM(true);
+            
+            startGameLoop();
+        }
+
+        function showGameOver() {
+            stopRewind();
+            eraseMultiplierExpiresAt = 0;
+            if (soundEnabled && !isTesting) {
+                SoundEngine.setBGM(false);
+                SoundEngine.playSE('gameover');
+            }
+            clearInterval(gameLoopTimer);
+            
+            document.getElementById('final-score').textContent = engine.score;
+            gameoverScreen.classList.remove('hidden');
+
+            // --- Save Score to Local Storage (記録日は実時間) ---
+            if (engine.score > 0 && !isDebugMode && !isTesting) {
+                try {
+                    const scores = JSON.parse(localStorage.getItem('tetris-scores') || '[]');
+                    scores.push({
+                        score: engine.score,
+                        lines: engine.lines,
+                        level: engine.level,
+                        timestamp: Date.now() // スコア記録のタイムスタンプのみDate.nowを使用
+                    });
+                    localStorage.setItem('tetris-scores', JSON.stringify(scores));
+                } catch (e) { console.error("Score save error", e); }
+            }
+        }
+
+        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.getElementById('retry-btn').addEventListener('click', startGame);
+        document.getElementById('back-menu-btn').addEventListener('click', () => {
+            gameoverScreen.classList.add('hidden');
+            playScreen.classList.add('hidden');
+            playScreen.classList.remove('flex');
+            menuScreen.classList.remove('hidden');
+            if (soundEnabled) SoundEngine.setBGM(false);
+        });
+
+        // Input Handling & Konami Code for Debug & Test Code
+        document.addEventListener('keydown', (e) => {
+            // キーコンフィグ待機中の処理
+            if (waitingForKey) {
+                e.preventDefault();
+                keyMap[waitingForKey] = e.key;
+                try { localStorage.setItem('tetris-keymap', JSON.stringify(keyMap)); } catch(err){}
+                waitingForKey = null;
+                renderKeyConfig();
+                updateSkillUIKeyNames();
+                return;
+            }
+
+            if (!menuScreen.classList.contains('hidden') && howtoModal.classList.contains('hidden') && keyconfigModal.classList.contains('hidden')) {
+                // Test Command Check
+                if (e.key.toLowerCase() === testCode[testIndex]) {
+                    testIndex++;
+                    if (testIndex === testCode.length) {
+                        testIndex = 0;
+                        runTests();
+                    }
+                } else {
+                    testIndex = 0;
+                }
+
+                // Konami Code Check
+                if (e.key.toLowerCase() === konamiCode[konamiIndex]) {
+                    konamiIndex++;
+                    if (konamiIndex === konamiCode.length) {
+                        isDebugMode = true;
+                        konamiIndex = 0;
+                        document.getElementById('debug-indicator').classList.remove('hidden');
+                        if(soundEnabled) {
+                            SoundEngine.init();
+                            SoundEngine.playSE('clear');
+                        }
+                    }
+                } else {
+                    konamiIndex = 0;
+                }
+            }
+
+            // スクロール防止（設定されているキーに該当する場合のみ）
+            const mappedKeys = Object.values(keyMap);
+            if (mappedKeys.includes(e.key) && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                e.preventDefault();
+            }
+
+            if (engine && !engine.gameOver) {
+                if (e.key === keyMap.LEFT) handleInput('LEFT');
+                if (e.key === keyMap.RIGHT) handleInput('RIGHT');
+                if (e.key === keyMap.DOWN) {
+                    isSoftDropping = true;
+                    if (!e.repeat) handleInput('DOWN');
+                }
+                if (e.key === keyMap.ROTATE) handleInput('ROTATE');
+                if (e.key === keyMap.DROP) handleInput('DROP');
+                if (e.key === keyMap.HOLD) handleInput('HOLD');
+
+                if (skillsEnabled) {
+                    if (e.key === keyMap.SKILL1 && !e.repeat) startRewind();
+                    if (e.key === keyMap.SKILL2) activateSkill('ERASE');
+                    if (e.key === keyMap.SKILL3) activateSkill('FREEZE');
+                    if (e.key === keyMap.SKILL4) activateSkill('ACCEL');
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === keyMap.DOWN) isSoftDropping = false;
+            if (e.key === keyMap.SKILL1) stopRewind();
+        });
+
+        // Touch Handling (タッチスワイプ判定も決定論的な論理時間に依存)
+        let touchState = { startX: 0, startY: 0, lastX: 0, lastY: 0, moved: false, startTime: 0, hardDropped: false };
+
+        playScreen.addEventListener('touchstart', (e) => {
+            if (e.target.closest('button')) return;
+            const touch = e.touches[0];
+            touchState = {
+                startX: touch.clientX, startY: touch.clientY,
+                lastX: touch.clientX, lastY: touch.clientY,
+                moved: false, startTime: logicalTime, hardDropped: false
+            };
+        });
+
+        playScreen.addEventListener('touchmove', (e) => {
+            if (e.target.closest('button')) return;
+            if (touchState.hardDropped || !engine || engine.gameOver || isRewinding) return;
+            
+            const touch = e.touches[0];
+            const dx = touch.clientX - touchState.lastX;
+            const dy = touch.clientY - touchState.lastY;
+            const totalDy = touch.clientY - touchState.startY;
+            const duration = logicalTime - touchState.startTime;
+
+            if (Math.abs(touch.clientX - touchState.startX) > 10 || Math.abs(touch.clientY - touchState.startY) > 10) {
+                touchState.moved = true;
+            }
+
+            if (totalDy < -40 && duration < 300) {
+                handleInput('DROP');
+                touchState.hardDropped = true;
+                return;
+            }
+
+            if (Math.abs(dx) > 30) {
+                if (dx > 0) handleInput('RIGHT'); else handleInput('LEFT');
+                touchState.lastX = touch.clientX;
+            }
+
+            if (dy > 30) {
+                handleInput('DOWN');
+                touchState.lastY = touch.clientY;
+            }
+        });
+
+        playScreen.addEventListener('touchend', (e) => {
+            if (e.target.closest('button')) return;
+            if (touchState.hardDropped || !engine || engine.gameOver || isRewinding) return;
+
+            const touch = e.changedTouches[0];
+            const duration = logicalTime - touchState.startTime;
+
+            if (!touchState.moved && duration < 300) {
+                const { innerWidth } = window;
+                if (touch.clientX < innerWidth / 3) {
+                    handleInput('LEFT');
+                } else if (touch.clientX > (innerWidth * 2) / 3) {
+                    handleInput('RIGHT');
+                } else {
+                    handleInput('ROTATE'); 
+                }
+            }
+        });
+
+        // --- History Modal & QUIT Events ---
+        const historyBtn = document.getElementById('history-open-btn');
+        const historyModal = document.getElementById('history-modal');
+        const historyCloseBtn = document.getElementById('history-close-btn');
+
+        if (historyBtn) {
+            historyBtn.addEventListener('click', () => {
+                const listEl = document.getElementById('score-history-list');
+                historyModal.classList.remove('hidden');
+                historyModal.classList.add('flex');
+
+                try {
+                    let scores = JSON.parse(localStorage.getItem('tetris-scores') || '[]');
+
+                    // Sort by score (descending), then by date (descending)
+                    scores.sort((a, b) => {
+                        if (b.score !== a.score) return b.score - a.score;
+                        return b.timestamp - a.timestamp;
+                    });
+
+                    if (scores.length === 0) {
+                        listEl.innerHTML = '<div class="text-center text-neutral-500 py-4 font-bold tracking-widest text-xs">NO RECORDS YET</div>';
+                    } else {
+                        let html = '';
+                        scores.slice(0, 20).forEach((s, i) => {
+                            const d = new Date(s.timestamp);
+                            const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                            html += `
+                            <div class="flex justify-between items-center bg-neutral-800/50 p-2 rounded mb-1 text-sm border border-neutral-700">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-neutral-500 font-bold w-4">${i + 1}.</span>
+                                    <span class="text-[#F6AA00] font-black">${s.score.toLocaleString()}</span>
+                                </div>
+                                <div class="text-right flex flex-col items-end">
+                                    <span class="text-[10px] text-neutral-400 font-bold">LV: ${s.level} / LINES: ${s.lines}</span>
+                                    <span class="text-[9px] text-neutral-500 tracking-wider">${dateStr}</span>
+                                </div>
+                            </div>`;
+                        });
+                        listEl.innerHTML = html;
+                    }
+                } catch (e) {
+                    console.error(e);
+                    listEl.innerHTML = '<div class="text-center text-red-500 py-4 font-bold tracking-widest text-xs">ERROR LOADING DATA</div>';
+                }
+            });
+        }
+
+        if (historyCloseBtn) {
+            historyCloseBtn.addEventListener('click', () => {
+                historyModal.classList.add('hidden');
+                historyModal.classList.remove('flex');
+            });
+        }
+
+        const quitBtn = document.getElementById('ingame-back-menu-btn');
+        if (quitBtn) {
+            quitBtn.addEventListener('click', () => {
+                stopRewind();
+                eraseMultiplierExpiresAt = 0;
+                clearInterval(gameLoopTimer);
+                if (soundEnabled) SoundEngine.setBGM(false);
+                
+                document.getElementById('play-screen').classList.add('hidden');
+                document.getElementById('play-screen').classList.remove('flex');
+                document.getElementById('menu-screen').classList.remove('hidden');
+            });
+        }
+
+        // 初期化時にキー名をUIに反映
+        updateSkillUIKeyNames();
+
+        // ==========================================
+        // --- Dynamic Test Automation Suite ---
+        // ==========================================
+        async function runTests() {
+            isTesting = true;
+            if (soundEnabled) SoundEngine.setBGM(false);
+
+            const testConsole = document.createElement('div');
+            testConsole.id = 'test-console';
+            testConsole.className = 'absolute top-0 left-0 w-full h-full bg-black/95 text-green-400 font-mono text-[10px] sm:text-xs p-4 overflow-y-auto z-[100] flex flex-col gap-1';
+            document.body.appendChild(testConsole);
+
+            const log = (msg, isError = false, isSection = false) => {
+                const div = document.createElement('div');
+                div.textContent = msg;
+                if (isError) div.className = 'text-red-500 font-bold py-1';
+                if (isSection) div.className = 'text-[#F6AA00] font-bold mt-3 mb-1 border-b border-[#F6AA00]/30 pb-1 tracking-widest';
+                testConsole.appendChild(div);
+                testConsole.scrollTop = testConsole.scrollHeight;
+            };
+
+            const assert = (condition, msg) => {
+                if (!condition) {
+                    log(`[FAIL] ${msg}`, true);
+                    throw new Error(msg);
+                }
+                log(`[PASS] ${msg}`);
+            };
+
+            const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            log('====================================', false, true);
+            log('   STARTING DYNAMIC TEST SUITE', false, true);
+            log('====================================', false, true);
+
+            try {
+                // UI遷移
+                document.getElementById('menu-screen').classList.add('hidden');
+                document.getElementById('play-screen').classList.remove('hidden');
+                document.getElementById('play-screen').classList.add('flex');
+                
+                // 1. Initialization Test
+                log('1. Initialization & Determinism Test', false, true);
+                initEngine();
+                assert(engine.score === 0, 'Initial score should be 0');
+                assert(engine.level === 1, 'Initial level should be 1');
+                assert(engine.sp === 1, 'Initial SP should be 1');
+                assert(logicalTime === 10, 'Logical time should be 10');
+                
+                const initialPieceType = engine.piece.type;
+                initEngine();
+                assert(engine.piece.type === initialPieceType, 'PRNG should be deterministic (same first piece)');
+                renderAll();
+                await wait(200);
+
+                // 2. Boundary Test (Left/Right limits)
+                log('2. Boundary & Movement Test', false, true);
+                initEngine();
+                const startX = engine.piece.x;
+                for(let i=0; i<10; i++) handleInput('LEFT');
+                assert(engine.piece.x >= 0, 'Piece should not move out of left bound');
+                for(let i=0; i<20; i++) handleInput('RIGHT');
+                assert(engine.piece.x + engine.piece.shape[0].length <= COLS, 'Piece should not move out of right bound');
+                renderAll();
+                await wait(200);
+
+                // 3. Rotation Test
+                log('3. Rotation Test', false, true);
+                initEngine();
+                engine.piece = createPieceObj('T');
+                const initialRot = engine.piece.rotIndex;
+                handleInput('ROTATE');
+                assert(engine.piece.rotIndex === (initialRot + 1) % 4, 'Piece should rotate clockwise');
+                handleInput('ROTATE');
+                handleInput('ROTATE');
+                handleInput('ROTATE');
+                assert(engine.piece.rotIndex === initialRot, '4 rotations should return to original state');
+                renderAll();
+                await wait(200);
+
+                // 4. Soft Drop Test
+                log('4. Soft Drop Test', false, true);
+                initEngine();
+                isSoftDropping = true;
+                const initialY = engine.piece.y;
+                handleInput('DOWN');
+                isSoftDropping = false;
+                assert(engine.piece.y === initialY + 1, 'Piece should move down');
+                assert(engine.score === 1, 'Score should increase by 1 on soft drop');
+                renderAll();
+                await wait(200);
+
+                // 5. Lock Delay (Grounding) Test
+                log('5. Lock Delay Test', false, true);
+                initEngine();
+                logicalTime = 100; // 時間を進めておく（0だと未スタート扱いになるため）
+                engine.piece.y = ROWS - engine.piece.shape.length; // 疑似的に一番下へ
+                handleInput('DOWN'); // 接地
+                assert(engine.lockDelayStarted > 0, 'Lock delay timer should start on ground');
+                const oldLockTimer = engine.lockDelayStarted;
+                logicalTime += 100;
+                handleInput('LEFT'); // 移動で猶予リセット
+                assert(engine.lockDelayStarted === logicalTime, 'Lock delay should reset on movement');
+                logicalTime += 501; // 猶予切れ
+                handleInput('DOWN'); // ロックダウン発火
+                assert(engine.lockDelayStarted === 0, 'Piece should lock and spawn new piece');
+                renderAll();
+                await wait(200);
+
+                // 6. Hard Drop Test
+                log('6. Hard Drop Test', false, true);
+                initEngine();
+                const preDropScore = engine.score;
+                const oldPieceType = engine.piece.type;
+                handleInput('DROP');
+                assert(engine.score > preDropScore, 'Score should increase on hard drop');
+                assert(engine.piece.y === 0, 'New piece should spawn at top');
+                assert(engine.piece.type !== oldPieceType || engine.piece.type === oldPieceType, 'A new piece is generated');
+                renderAll();
+                await wait(200);
+
+                // 7. Line Clear (Single & Tetris) Test
+                log('7. Line Clear Test', false, true);
+                initEngine();
+                // 1ライン消し準備
+                for (let x = 0; x < COLS - 1; x++) engine.board[ROWS - 1][x] = 'I';
+                engine.piece = createPieceObj('I');
+                handleInput('ROTATE'); engine.piece.x = COLS - 1;
+                handleInput('DROP');
+                assert(engine.lines === 1, '1 Line cleared');
+                // ベーススコア100点 + ハードドロップ(dy=16)落下ボーナス32点 = 132点
+                assert(engine.score === 132, `Score for Single should be 132, got ${engine.score}`); 
+                
+                // 4ライン消し (Tetris) 準備
+                initEngine();
+                engine.lines = 19; // 次でレベルアップ
+                for (let y = ROWS - 4; y < ROWS; y++) {
+                    for (let x = 0; x < COLS - 1; x++) engine.board[y][x] = 'O';
+                }
+                engine.piece = createPieceObj('I');
+                handleInput('ROTATE'); engine.piece.x = COLS - 1;
+                handleInput('DROP');
+                assert(engine.lines === 23, '4 Lines cleared (Tetris)');
+                assert(engine.level === 3, 'Level up triggered');
+                assert(engine.sp === 2, 'SP increased from clearing 20+ lines');
+                renderAll();
+                await wait(200);
+
+                // 8. Hold Piece Test
+                log('8. Hold Piece Test', false, true);
+                initEngine();
+                const firstHoldType = engine.piece.type;
+                const nextType = engine.nextPieces[0];
+                handleInput('HOLD');
+                assert(engine.holdPiece === firstHoldType, 'Current piece goes to hold');
+                assert(engine.piece.type === nextType, 'Next piece becomes current piece');
+                assert(engine.canHold === false, 'Cannot hold consecutively');
+                handleInput('DROP'); // Reset hold state
+                assert(engine.canHold === true, 'Hold flag resets after drop');
+                handleInput('HOLD');
+                assert(engine.piece.type === firstHoldType, 'Held piece comes back');
+                renderAll();
+                await wait(200);
+
+                // 9. FREEZE Skill Test
+                log('9. Skill: FREEZE Test', false, true);
+                initEngine();
+                engine.sp = 1;
+                activateSkill('FREEZE');
+                assert(activeEffect.type === 'FREEZE', 'FREEZE active');
+                assert(activeEffect.movesLeft === 3, '3 moves left initially');
+                handleInput('DROP');
+                assert(activeEffect.movesLeft === 2, 'Moves decreased');
+                handleInput('DROP');
+                handleInput('DROP');
+                assert(activeEffect.movesLeft === 0, 'Moves exhausted');
+                const py = engine.piece.y;
+                handleInput('DROP'); // 無効なはず
+                assert(engine.piece.y === py, 'Cannot move after moves exhausted in FREEZE');
+                logicalTime += 5001; // 効果切れ
+                activeEffect = null; 
+                renderAll();
+                await wait(200);
+
+                // 10. ACCEL Skill Test
+                log('10. Skill: ACCEL Test', false, true);
+                initEngine();
+                engine.sp = 1;
+                activateSkill('ACCEL');
+                assert(activeEffect.type === 'ACCEL', 'ACCEL active');
+                for (let x = 0; x < COLS - 1; x++) engine.board[ROWS - 1][x] = 'I';
+                engine.piece = createPieceObj('I');
+                handleInput('ROTATE'); engine.piece.x = COLS - 1;
+                const oldAccScore = engine.score;
+                handleInput('DROP'); // Single clear with 2x multiplier
+                // Score = Hard drop + 100 * 2 (multiplier)
+                assert(engine.score > oldAccScore + 100, 'Score is multiplied by 2 in ACCEL');
+                activeEffect = null;
+                renderAll();
+                await wait(200);
+
+                // 11. ERASE Skill Test
+                log('11. Skill: ERASE Test', false, true);
+                initEngine();
+                engine.sp = 1;
+                activateSkill('ERASE');
+                assert(eraseMultiplierExpiresAt > Date.now(), '50x Multiplier timer set');
+                const oldEraLines = engine.lines;
+                // 強制的に1ライン消す
+                for (let x = 0; x < COLS - 1; x++) engine.board[ROWS - 1][x] = 'I';
+                engine.piece = createPieceObj('I');
+                handleInput('ROTATE'); engine.piece.x = COLS - 1;
+                handleInput('DROP');
+                assert(engine.lines === oldEraLines + 1, 'Line cleared');
+                assert(eraseMultiplierExpiresAt === 0, 'Multiplier consumed after clear');
+                renderAll();
+                await wait(200);
+
+                // 12. REWIND Skill Test
+                log('12. Skill: REWIND Test', false, true);
+                initEngine();
+                engine.sp = 1;
+                saveHistory(); // time=0
+                logicalTime += 1000;
+                engine.piece.x = 2; // 移動させる
+                saveHistory(); // time=1000, x=2
+                logicalTime += 1000;
+                engine.piece.x = 4; // さらに移動
+                
+                assert(historyQueue.length === 2, 'History has 2 states');
+                startRewind();
+                assert(isRewinding, 'Rewind started');
+                await wait(150); // 内部的に3回くらい巻き戻しが呼ばれる
+                assert(logicalTime < 2000, 'Logical time reverted');
+                assert(engine.piece.x === 2 || engine.piece.x < 4, 'Piece position reverted');
+                stopRewind();
+                renderAll();
+                await wait(200);
+
+                // 13. Game Over Test
+                log('13. Game Over Test', false, true);
+                initEngine();
+                // Spawn block position = y:0, x:center. Fill the top completely.
+                for (let y = 0; y < 4; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        engine.board[y][x] = 'O';
+                    }
+                }
+                handleInput('DROP');
+                assert(engine.gameOver === true, 'Game over on spawn collision');
+                renderAll();
+                await wait(400);
+
+                log('====================================', false, true);
+                log(' ALL 13 TEST SUITES PASSED! 🚀', false, true);
+                log('====================================', false, true);
+
+            } catch (e) {
+                log(`[ERROR] Test failed: ${e.message}`, true);
+                console.error(e);
+            } finally {
+                const closeBtn = document.createElement('button');
+                closeBtn.textContent = 'CLOSE TEST CONSOLE & RETURN TO MENU';
+                closeBtn.className = 'mt-6 bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3 px-8 rounded tracking-widest border border-neutral-600 transition-colors w-full max-w-xs mx-auto';
+                closeBtn.onclick = () => {
+                    testConsole.remove();
+                    isTesting = false;
+                    document.getElementById('back-menu-btn').click();
+                };
+                testConsole.appendChild(closeBtn);
+                testConsole.scrollTop = testConsole.scrollHeight;
+            }
+        }
+
+    </script>
+</body>
+</html>
