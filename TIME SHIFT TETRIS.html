@@ -871,12 +871,31 @@
                 eraseMultiplierExpiresAt = Date.now() + 10000;
                 
                 for (let i = 0; i < 3; i++) {
-                    const dir = Math.random() > 0.5 ? 1 : -1; // ERASEのみランダム(Math.random)許容
-                    if (isValidMove(engine.board, engine.piece, dir, 0)) engine.piece.x += dir;
-                    if (Math.random() > 0.5) { 
+                    // --- ランダムな回転 (0〜3回) ---
+                    const rotations = Math.floor(Math.random() * 4);
+                    for (let r = 0; r < rotations; r++) {
                         const rotatedShape = engine.piece.shape[0].map((val, index) => engine.piece.shape.map(row => row[index]).reverse());
-                        if (isValidMove(engine.board, engine.piece, 0, 0, rotatedShape)) engine.piece.shape = rotatedShape;
+                        if (isValidMove(engine.board, engine.piece, 0, 0, rotatedShape)) {
+                            engine.piece.shape = rotatedShape;
+                            engine.piece.rotIndex = (engine.piece.rotIndex + 1) % 4;
+                        }
                     }
+
+                    // --- ランダムな位置 (X座標) ---
+                    const validX = [];
+                    // 配置可能なX座標をすべてリストアップ
+                    for (let testX = -3; testX <= COLS + 3; testX++) {
+                        const dx = testX - engine.piece.x;
+                        if (isValidMove(engine.board, engine.piece, dx, 0)) {
+                            validX.push(testX);
+                        }
+                    }
+                    // リストアップした有効な座標からランダムに選択
+                    if (validX.length > 0) {
+                        engine.piece.x = validX[Math.floor(Math.random() * validX.length)];
+                    }
+                    
+                    // --- ハードドロップ ---
                     let dy = 0;
                     while (isValidMove(engine.board, engine.piece, 0, dy + 1)) dy++;
                     engine.piece.y += dy;
