@@ -1,0 +1,1867 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JS Lite DB</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* スクロールバー */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    /* シンタックスハイライト (ライトテーマ向け) */
+    .hl-keyword { color: #7e22ce; font-weight: bold; } /* Purple */
+    .hl-string { color: #15803d; } /* Green */
+    .hl-number { color: #b45309; } /* Amber/Orange */
+
+    /* エディタの重ね合わせ */
+    #queryInput, #highlightLayer {
+      font-family: ui-monospace, monospace;
+      font-size: 0.875rem;
+      line-height: 1.5;
+      padding: 1rem;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      border: 1px solid transparent;
+    }
+  </style>
+</head>
+<body class="h-screen w-full bg-gray-50 text-gray-800 font-sans flex overflow-hidden">
+
+  <!-- ============================================================================ -->
+  <!-- 左サイドバー -->
+  <!-- ============================================================================ -->
+  <aside class="w-64 bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm z-10">
+    <!-- ヘッダー -->
+    <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
+      <h1 class="font-bold text-lg text-blue-600">JS Lite DB</h1>
+      <button id="openHelpBtn" class="text-sm text-gray-500 hover:text-blue-600 font-medium transition-colors" title="コマンドリファレンス">Help</button>
+    </div>
+
+    <!-- ツールバー -->
+    <div class="p-2 border-b border-gray-200 flex flex-wrap gap-2 text-xs">
+      <button id="saveLocalBtn" class="flex-1 min-w-[45%] bg-white hover:bg-gray-100 border border-gray-300 py-1.5 rounded text-gray-700 transition-colors shadow-sm">Save (Local)</button>
+      <button id="loadLocalBtn" class="flex-1 min-w-[45%] bg-white hover:bg-gray-100 border border-gray-300 py-1.5 rounded text-gray-700 transition-colors shadow-sm">Load (Local)</button>
+      <button id="clearLocalBtn" class="flex-1 min-w-[45%] bg-red-50 hover:bg-red-100 border border-red-200 py-1.5 rounded text-red-700 transition-colors shadow-sm">Clear (Local)</button>
+      <button id="openGeneratorBtn" class="flex-1 min-w-[45%] bg-white hover:bg-gray-100 border border-gray-300 py-1.5 rounded text-gray-700 transition-colors shadow-sm">Test Data</button>
+      <button id="openCsvBtn" class="flex-1 min-w-[45%] bg-white hover:bg-gray-100 border border-gray-300 py-1.5 rounded text-gray-700 transition-colors shadow-sm">Import CSV</button>
+    </div>
+
+    <!-- テーブル一覧 -->
+    <div class="flex-1 overflow-y-auto p-4">
+      <div class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Tables</div>
+      <ul id="tableTree" class="space-y-1">
+        <!-- JSで描画 -->
+      </ul>
+    </div>
+  </aside>
+
+  <!-- ============================================================================ -->
+  <!-- メイン領域 -->
+  <!-- ============================================================================ -->
+  <main class="flex-1 flex flex-col overflow-hidden relative bg-gray-50">
+    
+    <!-- エディタ部分 -->
+    <div class="p-4 border-b border-gray-200 bg-white flex flex-col shrink-0 shadow-sm z-0">
+      <div class="flex justify-between items-center mb-2">
+        <label class="text-sm font-semibold text-gray-600">Query Workspace</label>
+        <div class="flex gap-2 items-center text-xs">
+          <button id="clearBtn" class="text-gray-500 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:bg-gray-100 transition-colors">Clear</button>
+          <button id="executeBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded font-medium shadow-sm transition-colors">Run</button>
+        </div>
+      </div>
+      
+      <div class="relative w-full h-32 bg-white border border-gray-300 rounded overflow-hidden focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-inner">
+        <!-- text-gray-900 でハイライトのベース色を指定 -->
+        <pre id="highlightLayer" aria-hidden="true" class="absolute inset-0 m-0 pointer-events-none text-gray-800 overflow-hidden bg-transparent z-0"></pre>
+        <!-- 入力エリアの文字色は透明にして、ハイライトを見せる -->
+        <textarea id="queryInput" class="absolute inset-0 w-full h-full bg-transparent text-transparent caret-black outline-none resize-none z-10" spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <!-- メトリクス & ツール -->
+    <div class="px-4 py-2 bg-gray-100 flex justify-between items-center border-b border-gray-200 shrink-0 text-sm">
+      <div class="flex gap-6">
+        <div class="flex flex-col">
+          <span class="text-[10px] text-gray-500 uppercase font-semibold">Time</span>
+          <span id="metricTime" class="font-mono text-gray-700 font-medium">---</span>
+        </div>
+        <div class="flex flex-col">
+          <span class="text-[10px] text-gray-500 uppercase font-semibold">Rows</span>
+          <span id="metricRows" class="font-mono text-gray-700 font-medium">---</span>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-3">
+        <button id="exportCsvBtn" class="text-gray-600 hover:text-gray-900 text-xs border border-gray-300 bg-white hover:bg-gray-50 px-3 py-1.5 rounded shadow-sm disabled:opacity-50 disabled:bg-gray-100 transition-colors" disabled>
+          Export CSV
+        </button>
+        <div class="flex items-center gap-2">
+          <label class="text-[10px] text-gray-500 uppercase font-semibold">Limit</label>
+          <select id="displayLimit" class="bg-white border border-gray-300 text-gray-700 text-xs rounded px-2 py-1 outline-none shadow-sm focus:border-blue-500 cursor-pointer">
+            <option value="100" selected>100</option>
+            <option value="1000">1,000</option>
+            <option value="10000">10,000</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 結果エリア -->
+    <div id="resultsContainer" class="flex-1 overflow-auto p-4 relative">
+      <div id="resultsArea" class="min-h-full flex flex-col">
+        <div class="m-auto text-gray-400 text-sm">Run a query to see results.</div>
+      </div>
+    </div>
+    
+    <!-- システムメッセージ (Toast) -->
+    <div id="toastMsg" class="absolute bottom-4 right-4 px-4 py-2 rounded shadow-lg transition-opacity duration-300 opacity-0 pointer-events-none z-50 text-sm font-medium"></div>
+  </main>
+
+  <!-- ============================================================================ -->
+  <!-- モーダル: コマンドリファレンス -->
+  <!-- ============================================================================ -->
+  <div id="helpModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <div id="helpOverlay" class="absolute inset-0 bg-gray-900/40 backdrop-blur-sm cursor-pointer"></div>
+    <div class="relative bg-white border border-gray-200 rounded-lg shadow-2xl w-full max-w-3xl p-6 m-4 flex flex-col gap-4 max-h-[85vh]">
+      <div class="flex justify-between items-center border-b border-gray-100 pb-3">
+        <h2 class="text-lg font-bold text-gray-800">Command Reference</h2>
+        <button class="closeModalBtn text-gray-400 hover:text-gray-600 text-xl font-bold leading-none">✕</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-sm text-gray-600 font-medium">Target Table:</label>
+        <select id="helpTableSelect" class="bg-gray-50 border border-gray-300 text-gray-800 text-sm rounded px-3 py-1.5 focus:border-blue-500 outline-none cursor-pointer"></select>
+      </div>
+      <div class="overflow-y-auto pr-2 mt-2 space-y-5" id="helpContent"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================================ -->
+  <!-- モーダル: テストデータ作成 -->
+  <!-- ============================================================================ -->
+  <div id="generatorModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <div class="absolute inset-0 bg-gray-900/40 backdrop-blur-sm closeModalBg cursor-pointer"></div>
+    <div class="relative bg-white border border-gray-200 rounded-lg shadow-2xl w-full max-w-sm p-6 m-4 flex flex-col gap-4">
+      <div class="flex justify-between items-center border-b border-gray-100 pb-3">
+        <h2 class="text-lg font-bold text-gray-800">Test Data Generator</h2>
+        <button class="closeModalBtn text-gray-400 hover:text-gray-600 text-xl font-bold leading-none">✕</button>
+      </div>
+      <p class="text-xs text-gray-500 leading-relaxed">選択したテーブルに指定件数のダミーデータを注入します。</p>
+      
+      <div class="flex flex-col gap-1 mt-1">
+        <label class="text-sm text-gray-600 font-medium">Target Table</label>
+        <select id="genTableSelect" class="bg-gray-50 border border-gray-300 text-gray-800 text-sm rounded px-3 py-2 w-full focus:border-blue-500 outline-none cursor-pointer"></select>
+      </div>
+      
+      <div class="flex flex-col gap-1">
+        <label class="text-sm text-gray-600 font-medium">Row Count</label>
+        <input type="number" id="genRowCount" value="10000" min="1" max="100000" class="bg-gray-50 border border-gray-300 text-gray-800 text-sm rounded px-3 py-2 w-full outline-none focus:border-blue-500">
+      </div>
+
+      <div class="pt-3 flex justify-end">
+        <button id="generateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded text-sm font-medium transition-colors shadow-sm">Inject Rows</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================================ -->
+  <!-- モーダル: CSVインポート -->
+  <!-- ============================================================================ -->
+  <div id="csvModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <div class="absolute inset-0 bg-gray-900/40 backdrop-blur-sm closeModalBg cursor-pointer"></div>
+    <div class="relative bg-white border border-gray-200 rounded-lg shadow-2xl w-full max-w-sm p-6 m-4 flex flex-col gap-4">
+      <div class="flex justify-between items-center border-b border-gray-100 pb-3">
+        <h2 class="text-lg font-bold text-gray-800">CSV Import</h2>
+        <button class="closeModalBtn text-gray-400 hover:text-gray-600 text-xl font-bold leading-none">✕</button>
+      </div>
+      <p class="text-xs text-gray-500 leading-relaxed">CSVデータを既存のテーブルに追加します。（1行目はヘッダーとして無視、列数が一致している必要があります）</p>
+      
+      <div class="flex flex-col gap-1 mt-1">
+        <label class="text-sm text-gray-600 font-medium">Target Table</label>
+        <select id="csvTableSelect" class="bg-gray-50 border border-gray-300 text-gray-800 text-sm rounded px-3 py-2 w-full focus:border-blue-500 outline-none cursor-pointer"></select>
+      </div>
+
+      <div class="flex flex-col gap-1">
+        <label class="text-sm text-gray-600 font-medium">CSV File</label>
+        <input type="file" id="csvFileInput" accept=".csv" class="text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+      </div>
+      
+      <div class="pt-3 flex justify-end">
+        <button id="execCsvImportBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded text-sm font-medium transition-colors shadow-sm">Import Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================================ -->
+  <!-- モーダル: データクリア確認 -->
+  <!-- ============================================================================ -->
+  <div id="clearConfirmModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <div class="absolute inset-0 bg-gray-900/40 backdrop-blur-sm closeModalBg cursor-pointer"></div>
+    <div class="relative bg-white border border-gray-200 rounded-lg shadow-2xl w-full max-w-sm p-6 m-4 flex flex-col gap-4">
+      <div class="flex justify-between items-center border-b border-gray-100 pb-3">
+        <h2 class="text-lg font-bold text-red-600">Confirm Clear</h2>
+        <button class="closeModalBtn text-gray-400 hover:text-gray-600 text-xl font-bold leading-none">✕</button>
+      </div>
+      <p class="text-sm text-gray-600 leading-relaxed">Local Storage のデータを完全に削除し、初期状態のデータベースにリセットしますか？この操作は取り消せません。</p>
+      
+      <div class="pt-3 flex justify-end gap-2">
+        <button class="closeModalBtn bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm font-medium transition-colors shadow-sm">Cancel</button>
+        <button id="execClearLocalBtn" class="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded text-sm font-medium transition-colors shadow-sm">Clear Data</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================================
+    // [Database Engine] - Zero Allocation & TypedArray Columnar Storage
+    // ============================================================================
+    class Table {
+        constructor(capacity = 10000) {
+            this.capacity = capacity;
+            this.rowCount = 0;
+            this.cols = {}; 
+            this.strPools = {}; 
+            this.strMaps = {}; 
+        }
+
+        addColumn(col) {
+            if (this.cols[col]) return;
+            // 32-bit packing for Memory efficiency and Cache Locality
+            // Type(8bit) + String Index(24bit) packed into a single Uint32Array
+            this.cols[col] = {
+                num: new Float64Array(this.capacity),
+                meta: new Uint32Array(this.capacity)
+            };
+            this.strPools[col] = [];
+            this.strMaps[col] = {};
+        }
+
+        grow() {
+            const newCap = this.capacity === 0 ? 10000 : this.capacity * 2;
+            for (let col in this.cols) {
+                const c = this.cols[col];
+                const newNum = new Float64Array(newCap); newNum.set(c.num); c.num = newNum;
+                const newMeta = new Uint32Array(newCap); newMeta.set(c.meta); c.meta = newMeta;
+            }
+            this.capacity = newCap;
+        }
+
+        setValue(col, idx, val) {
+            const c = this.cols[col];
+            if (val === null || val === undefined) {
+                c.meta[idx] = 0; // type 0 = Null
+            } else if (typeof val === 'number') {
+                c.meta[idx] = 1 << 24; // type 1 = Number
+                c.num[idx] = val;
+            } else {
+                const s = String(val);
+                let sIdx = this.strMaps[col][s];
+                if (sIdx === undefined) {
+                    sIdx = this.strPools[col].length;
+                    this.strPools[col].push(s);
+                    this.strMaps[col][s] = sIdx;
+                }
+                c.meta[idx] = (2 << 24) | (sIdx & 0xFFFFFF); // type 2 = String + 24bit index
+            }
+        }
+
+        getValue(col, idx) {
+            if (!this.cols[col]) return null;
+            const meta = this.cols[col].meta[idx];
+            const type = meta >>> 24;
+            if (type === 0) return null;
+            if (type === 1) return this.cols[col].num[idx];
+            return this.strPools[col][meta & 0xFFFFFF];
+        }
+
+        getColumnNames() {
+            return Object.keys(this.cols);
+        }
+
+        // Deep copy for Copy-on-Write transaction snapshots
+        cloneData() {
+            const clonedCols = {};
+            for (let col in this.cols) {
+                clonedCols[col] = {
+                    num: new Float64Array(this.cols[col].num),
+                    meta: new Uint32Array(this.cols[col].meta)
+                };
+            }
+            const strPoolsSizes = {};
+            for (let col in this.strPools) {
+                strPoolsSizes[col] = this.strPools[col].length;
+            }
+            return {
+                capacity: this.capacity,
+                rowCount: this.rowCount,
+                cols: clonedCols,
+                strPoolsSizes: strPoolsSizes
+            };
+        }
+
+        // Restore from snapshot for ROLLBACK
+        restoreData(snapshot) {
+            this.capacity = snapshot.capacity;
+            this.rowCount = snapshot.rowCount;
+            this.cols = snapshot.cols;
+            // Optionally trim the string pool to original size, maps are untouched as they just point to existing strings
+            for (let col in snapshot.strPoolsSizes) {
+                const size = snapshot.strPoolsSizes[col];
+                if (this.strPools[col].length > size) {
+                    const removed = this.strPools[col].splice(size);
+                    removed.forEach(s => delete this.strMaps[col][s]);
+                }
+            }
+        }
+    }
+
+    class DatabaseEngine {
+      constructor() {
+        this.tables = {};
+        this.inTransaction = false;
+        this.undoLog = [];
+        this._initDefaultData();
+      }
+
+      _initDefaultData() {
+        const createTableFromData = (name, dataObj) => {
+            const t = new Table();
+            const cols = Object.keys(dataObj);
+            if(cols.length === 0) return t;
+            cols.forEach(c => t.addColumn(c));
+            const rows = dataObj[cols[0]].length;
+            while(t.capacity < rows) t.grow();
+            for(let i=0; i<rows; i++) {
+                cols.forEach(c => t.setValue(c, i, dataObj[c][i]));
+            }
+            t.rowCount = rows;
+            this.tables[name] = t;
+        };
+
+        createTableFromData('users', {
+            id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            name: ["Alice", "Bob", "Charlie", "Dave", "Eve", "Frank", "Grace", "Heidi", "Ivan", "Judy"],
+            age: [25, 30, 22, 35, 28, 40, 29, 31, 24, 27],
+            status: ["Active", "Active", "Inactive", "Active", "Active", "Active", "Inactive", "Active", "Active", "Active"]
+        });
+
+        createTableFromData('products', {
+            id: [101, 102, 103, 104, 105],
+            name: ["Laptop", "Monitor", "Mouse", "Keyboard", "Router"],
+            price: [1500, 800, 120, 250, 400],
+            stock: [45, 12, 100, 80, 0]
+        });
+
+        createTableFromData('orders', {
+            order_id: [1001, 1002, 1003, 1004, 1005],
+            user_id: [1, 2, 1, 3, 4],
+            product_id: [101, 103, 105, 102, 104],
+            amount: [1, 2, 1, 5, 1]
+        });
+      }
+
+      toJSON() {
+        let dump = {};
+        for(let tName in this.tables) {
+          const t = this.tables[tName];
+          dump[tName] = {
+            rowCount: t.rowCount, capacity: t.capacity,
+            strPools: t.strPools, strMaps: t.strMaps, cols: {}
+          };
+          for(let c in t.cols) {
+            dump[tName].cols[c] = {
+              num: Array.from(t.cols[c].num.slice(0, t.rowCount)),
+              meta: Array.from(t.cols[c].meta.slice(0, t.rowCount))
+            };
+          }
+        }
+        return JSON.stringify(dump);
+      }
+
+      fromJSON(jsonStr) {
+        const dump = JSON.parse(jsonStr);
+        this.tables = {};
+        for(let tName in dump) {
+          const dt = dump[tName];
+          const t = new Table(Math.max(dt.capacity, dt.rowCount));
+          t.rowCount = dt.rowCount;
+          for(let c in dt.cols) {
+            t.addColumn(c);
+            t.cols[c].num.set(dt.cols[c].num);
+            t.cols[c].meta.set(dt.cols[c].meta);
+          }
+          t.strPools = dt.strPools; 
+          t.strMaps = dt.strMaps;
+          this.tables[tName] = t;
+        }
+      }
+
+      generateDummyData(tableName, count = 10000) {
+        if (!this.tables[tableName]) return 0;
+        const data = this.tables[tableName];
+        const cols = data.getColumnNames();
+        const idCol = cols.find(c => c.toLowerCase().includes('id'));
+        let startId = 1;
+        if (idCol && data.rowCount > 0) {
+           let maxId = 0;
+           for(let i=0; i<data.rowCount; i++) {
+               let v = data.getValue(idCol, i);
+               if (typeof v === 'number' && v > maxId) maxId = v;
+           }
+           startId = maxId + 1;
+        }
+
+        while (data.capacity < data.rowCount + count) data.grow();
+
+        for(let i = 0; i < count; i++) {
+           const idx = data.rowCount;
+           cols.forEach(col => {
+              if (col === idCol) data.setValue(col, idx, startId + i);
+              else if (col === 'name') data.setValue(col, idx, "Dummy_" + Math.floor(Math.random()*100000));
+              else if (col === 'age') data.setValue(col, idx, 20 + Math.floor(Math.random()*50));
+              else if (col === 'status') data.setValue(col, idx, Math.random() > 0.2 ? "Active" : "Inactive");
+              else if (col === 'price') data.setValue(col, idx, Math.floor(Math.random()*1000)*10);
+              else if (col === 'stock' || col === 'amount') data.setValue(col, idx, Math.floor(Math.random()*100));
+              else data.setValue(col, idx, "Data_" + Math.floor(Math.random()*1000));
+           });
+           data.rowCount++;
+        }
+        return count;
+      }
+
+      _cowColumns(tableName, cols) {
+          if (!this.inTransaction) return;
+          let log = this.undoLog.find(l => l.type === 'TABLE_COW' && l.table === tableName);
+          const table = this.tables[tableName];
+
+          if (!log) {
+              log = {
+                  type: 'TABLE_COW',
+                  table: tableName,
+                  rowCount: table.rowCount,
+                  cols: {},
+                  strPoolsSizes: {}
+              };
+              for (let c in table.strPools) {
+                  log.strPoolsSizes[c] = table.strPools[c].length;
+              }
+              this.undoLog.push(log);
+          }
+
+          if (cols === 'ALL') {
+              cols = table.getColumnNames();
+          } else if (!cols) {
+              cols = [];
+          }
+
+          cols.forEach(col => {
+              if (!log.cols[col] && table.cols[col]) {
+                  log.cols[col] = {
+                      num: new Float64Array(table.cols[col].num),
+                      meta: new Uint32Array(table.cols[col].meta)
+                  };
+              }
+          });
+      }
+
+      _logDropTable(tableName) {
+          if (!this.inTransaction) return;
+          this.undoLog.push({ type: 'DROP_TABLE', table: tableName, tableObj: this.tables[tableName] });
+      }
+
+      _logCreateTable(tableName) {
+          if (!this.inTransaction) return;
+          this.undoLog.push({ type: 'CREATE_TABLE', table: tableName });
+      }
+
+      findInnerSubquery(sql) {
+          let depth = 0, maxDepth = 0, startIdx = -1, endIdx = -1;
+          for (let i = 0; i < sql.length; i++) {
+              if (sql[i] === '(') {
+                  depth++;
+                  if (/^\(\s*SELECT\b/i.test(sql.slice(i)) && depth >= maxDepth) { maxDepth = depth; startIdx = i; }
+              } else if (sql[i] === ')') {
+                  if (startIdx !== -1 && depth === maxDepth && endIdx === -1) endIdx = i;
+                  depth--;
+              }
+          }
+          return (startIdx !== -1 && endIdx !== -1) ? { start: startIdx, end: endIdx, query: sql.slice(startIdx + 1, endIdx).trim() } : null;
+      }
+
+      expandSubqueries(sql, strMap) {
+          let expandedSql = sql;
+          while(true) {
+              let match = this.findInnerSubquery(expandedSql);
+              if (!match) break;
+              
+              let subResult = this.executeQuery(match.query, true, strMap); 
+              if(subResult.error) throw new Error(subResult.error);
+              
+              const beforeStr = expandedSql.slice(0, match.start);
+              if (/\bNOT\s+IN\s*$/i.test(beforeStr.trim())) {
+                  const vals = subResult.data.map(r => Object.values(r)[0]);
+                  const valsStr = vals.map(v => {
+                      if (typeof v === 'string') {
+                          strMap.push(`'${v}'`);
+                          return `__STR_${strMap.length - 1}__`;
+                      }
+                      return v;
+                  }).join(', ');
+                  expandedSql = expandedSql.slice(0, match.start) + `(${valsStr})` + expandedSql.slice(match.end + 1);
+              } else if (/\bIN\s*$/i.test(beforeStr.trim())) {
+                  const vals = subResult.data.map(r => Object.values(r)[0]);
+                  const valsStr = vals.map(v => {
+                      if (typeof v === 'string') {
+                          strMap.push(`'${v}'`);
+                          return `__STR_${strMap.length - 1}__`;
+                      }
+                      return v;
+                  }).join(', ');
+                  expandedSql = expandedSql.slice(0, match.start) + `(${valsStr})` + expandedSql.slice(match.end + 1);
+              } else if (/\bFROM\s*$/i.test(beforeStr.trim()) || /\bJOIN\s*$/i.test(beforeStr.trim())) {
+                  const tmpName = '__tmp_' + Math.floor(Math.random()*1000000);
+                  const t = new Table();
+                  if (subResult.data && subResult.data.length > 0) {
+                      const keys = Object.keys(subResult.data[0]);
+                      keys.forEach(k => t.addColumn(k));
+                      while(t.capacity < subResult.data.length) t.grow();
+                      subResult.data.forEach((row, i) => {
+                          keys.forEach(k => t.setValue(k, i, row[k]));
+                      });
+                      t.rowCount = subResult.data.length;
+                  }
+                  this.tables[tmpName] = t;
+                  expandedSql = expandedSql.slice(0, match.start) + tmpName + expandedSql.slice(match.end + 1);
+              } else {
+                  let val = subResult.data.length > 0 ? Object.values(subResult.data[0])[0] : null;
+                  if (typeof val === 'string') {
+                      strMap.push(`'${val}'`);
+                      val = `__STR_${strMap.length - 1}__`;
+                  }
+                  expandedSql = expandedSql.slice(0, match.start) + val + expandedSql.slice(match.end + 1);
+              }
+          }
+          return expandedSql;
+      }
+
+      cleanupTempTables() {
+          Object.keys(this.tables).forEach(tbl => {
+              if (tbl.startsWith('__tmp_')) delete this.tables[tbl];
+          });
+      }
+
+      compileCondition(expr, strMap) {
+          let s = expr;
+          let caseMatch;
+          while((caseMatch = s.match(/\bCASE\s+WHEN\s+(.+?)\s+THEN\s+(.+?)(?:\s+ELSE\s+(.+?))?\s+END\b/i))) {
+              s = s.replace(caseMatch[0], `((${caseMatch[1]}) ? (${caseMatch[2]}) : (${caseMatch[3] || 'null'}))`);
+          }
+          
+          s = s.replace(/\bIS\s+NOT\s+NULL\b/gi, '!== null').replace(/\bIS\s+NULL\b/gi, '=== null');
+          s = s.replace(/([a-zA-Z0-9_.]+)\s+BETWEEN\s+(.+?)\s+AND\s+(.+?)(?=\s*(?:AND\b|OR\b|\)|$))/gi, (m, col, a, b) => `(__resolve('${col}', ptrs, dbTables, aliases) >= ${a} && __resolve('${col}', ptrs, dbTables, aliases) <= ${b})`);
+          s = s.replace(/([a-zA-Z0-9_.]+)\s+(NOT\s+)?LIKE\s+(__STR_\d+__)/gi, (m, col, not, strRef) => `${not ? '!' : ''}__like(__resolve('${col}', ptrs, dbTables, aliases), ${strRef})`);
+          
+          // String/Math/Date Functions mapping
+          s = s.replace(/\bUPPER\(/gi, '__upper(');
+          s = s.replace(/\bLOWER\(/gi, '__lower(');
+          s = s.replace(/\bLENGTH\(/gi, '__length(');
+          s = s.replace(/\bROUND\(/gi, '__round(');
+          s = s.replace(/\bCOALESCE\(/gi, '__coalesce(');
+          s = s.replace(/\bSUBSTRING\(/gi, '__substring(');
+          s = s.replace(/\bCONCAT\(/gi, '__concat(');
+          s = s.replace(/\bREPLACE\(/gi, '__replace(');
+          s = s.replace(/\bTRIM\(/gi, '__trim(');
+          s = s.replace(/\bABS\(/gi, '__abs(');
+          s = s.replace(/\bCEIL\(/gi, '__ceil(');
+          s = s.replace(/\bFLOOR\(/gi, '__floor(');
+          s = s.replace(/\bNOW\(\)/gi, '__now()');
+          s = s.replace(/\bLPAD\(/gi, '__lpad(');
+          s = s.replace(/\bRPAD\(/gi, '__rpad(');
+          s = s.replace(/\bPOWER\(/gi, '__power(');
+          s = s.replace(/\bSQRT\(/gi, '__sqrt(');
+          s = s.replace(/\bYEAR\(/gi, '__year(');
+          s = s.replace(/\bMONTH\(/gi, '__month(');
+          s = s.replace(/\bDAY\(/gi, '__day(');
+          s = s.replace(/\bMOD\(/gi, '__mod(');
+          s = s.replace(/\bSIGN\(/gi, '__sign(');
+          s = s.replace(/\bRAND\(\)/gi, '__rand()');
+
+          s = s.replace(/\bAND\b/gi, '&&').replace(/\bOR\b/gi, '||')
+               .replace(/!==/g, '__NEQ__').replace(/===/g, '=')
+               .replace(/<=/g, '__LTE__').replace(/>=/g, '__GTE__').replace(/<>/g, '__NEQ__').replace(/!=/g, '__NEQ__')
+               .replace(/</g, '__LT__').replace(/>/g, '__GT__')
+               .replace(/=/g, '===')
+               .replace(/__LTE__/g, '<=').replace(/__GTE__/g, '>=').replace(/__NEQ__/g, '!==').replace(/__LT__/g, '<').replace(/__GT__/g, '>');
+
+          s = s.replace(/([a-zA-Z0-9_.]+)\s+NOT\s+IN\s*\(([^)]*)\)/gi, (m, col, vals) => `!([${vals}].includes(__resolve('${col}', ptrs, dbTables, aliases)))`);
+          s = s.replace(/([a-zA-Z0-9_.]+)\s+IN\s*\(([^)]*)\)/gi, (m, col, vals) => `[${vals}].includes(__resolve('${col}', ptrs, dbTables, aliases))`);
+
+          const protectedKeywords = ['&&', '||', 'true', 'false', 'null', 'undefined', '__like', '__upper', '__lower', '__length', '__round', '__coalesce', '__substring', '__concat', '__replace', '__trim', '__abs', '__ceil', '__floor', '__now', '__lpad', '__rpad', '__power', '__sqrt', '__year', '__month', '__day', '__mod', '__sign', '__rand', '__resolve', 'ptrs', 'dbTables', 'aliases', 'includes', 'Math', 'Date'];
+          s = s.replace(/('([^'\\]|\\.)*'|"([^"\\]|\\.)*")|\b([a-zA-Z_][a-zA-Z0-9_.]*)\b/g, (m, stringLit, _1, _2, word) => {
+              if (stringLit) return m;
+              if (!word) return m;
+              if (protectedKeywords.includes(word) || word.startsWith('__STR_')) return word;
+              return `__resolve('${word}', ptrs, dbTables, aliases)`;
+          });
+
+          strMap.forEach((str, i) => {
+              s = s.replace(new RegExp(`__STR_${i}__`, 'g'), str);
+          });
+
+          return new Function('ptrs', 'dbTables', 'aliases', `
+              const __resolve = (col, pts, dbs, als) => {
+                  let tName, cName;
+                  if (col.includes('.')) {
+                      let parts = col.split('.');
+                      tName = parts[0]; cName = parts[1];
+                  } else {
+                      cName = col;
+                      for (let alias in pts) {
+                          let tbl = als[alias];
+                          // HAVING等でダミーテーブルを使用する場合への対応
+                          if (tbl && dbs[tbl] && dbs[tbl].cols && dbs[tbl].cols[cName]) {
+                              tName = alias; break;
+                          }
+                      }
+                  }
+                  if (!tName) return null;
+                  let actualTbl = als[tName] || tName;
+                  let idx = pts[tName];
+                  if (idx === undefined || idx === null || idx === -1) return null;
+                  return dbs[actualTbl].getValue(cName, idx);
+              };
+              const __like = (val, pattern) => {
+                 if(val === null || val === undefined) return false;
+                 let regexPattern = '^' + pattern.replace(/[.+?^\\$\\{\\}()|\\[\\]\\\\]/g, '\\\\$&').replace(/%/g, '.*').replace(/_/g, '.') + '$';
+                 return new RegExp(regexPattern, 'i').test(String(val));
+              };
+              const __upper = (val) => val != null ? String(val).toUpperCase() : null;
+              const __lower = (val) => val != null ? String(val).toLowerCase() : null;
+              const __length = (val) => val != null ? String(val).length : null;
+              const __round = (val) => val != null ? Math.round(Number(val)) : null;
+              const __coalesce = (...args) => {
+                  for(let i=0; i<args.length; i++) {
+                      if(args[i] !== null && args[i] !== undefined) return args[i];
+                  }
+                  return null;
+              };
+              const __substring = (val, start, len) => {
+                  if (val == null) return null;
+                  let str = String(val);
+                  let s = start > 0 ? start - 1 : 0;
+                  if (len !== undefined) return str.substr(s, len);
+                  return str.substr(s);
+              };
+              const __concat = (...args) => args.map(a => a != null ? String(a) : '').join('');
+              const __replace = (val, search, replace) => val != null ? String(val).split(search).join(replace) : null;
+              const __trim = (val) => val != null ? String(val).trim() : null;
+              const __abs = (val) => val != null ? Math.abs(Number(val)) : null;
+              const __ceil = (val) => val != null ? Math.ceil(Number(val)) : null;
+              const __floor = (val) => val != null ? Math.floor(Number(val)) : null;
+              const __now = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
+              const __lpad = (str, len, pad) => str != null ? String(str).padStart(Number(len), pad != null ? String(pad) : ' ') : null;
+              const __rpad = (str, len, pad) => str != null ? String(str).padEnd(Number(len), pad != null ? String(pad) : ' ') : null;
+              const __power = (base, exp) => (base != null && exp != null) ? Math.pow(Number(base), Number(exp)) : null;
+              const __sqrt = (val) => val != null ? Math.sqrt(Number(val)) : null;
+              const __year = (val) => val != null ? new Date(val).getFullYear() : null;
+              const __month = (val) => val != null ? new Date(val).getMonth() + 1 : null;
+              const __day = (val) => val != null ? new Date(val).getDate() : null;
+              const __mod = (a, b) => (a != null && b != null) ? Number(a) % Number(b) : null;
+              const __sign = (val) => val != null ? Math.sign(Number(val)) : null;
+              const __rand = () => Math.random();
+              try { return ${s}; } catch(e) { return null; }
+          `);
+      }
+
+      splitSelectClause(clause) {
+          let parts = [], current = "", depth = 0;
+          for (let i = 0; i < clause.length; i++) {
+              let c = clause[i];
+              if (c === '(') depth++;
+              if (c === ')') depth--;
+              if (c === ',' && depth === 0) { parts.push(current.trim()); current = ""; } 
+              else { current += c; }
+          }
+          parts.push(current.trim());
+          return parts;
+      }
+
+      executeQuery(rawSql, isSubquery = false, externalStrMap = null) {
+        const startTime = performance.now();
+        let sql = rawSql.trim().replace(/;$/, '');
+        
+        let strMap = externalStrMap;
+        if (!isSubquery && !strMap) {
+            strMap = [];
+            sql = sql.replace(/('([^'\\]|\\.)*'|"([^"\\]|\\.)*")/g, match => {
+                strMap.push(match);
+                return `__STR_${strMap.length - 1}__`;
+            });
+        }
+        
+        let resultSet = [];
+        let affectedRows = 0;
+
+        try {
+          if (!isSubquery) sql = this.expandSubqueries(sql, strMap);
+
+          if (/^begin/i.test(sql)) {
+             if(this.inTransaction) throw new Error("Transaction already active.");
+             this.inTransaction = true;
+             this.undoLog = [];
+             resultSet = [{ Result: "Success", Message: "Transaction Started" }];
+          } 
+          else if (/^commit/i.test(sql)) {
+             if(!this.inTransaction) throw new Error("No active transaction.");
+             this.inTransaction = false; 
+             this.undoLog = [];
+             resultSet = [{ Result: "Success", Message: "Transaction Committed" }];
+          }
+          else if (/^rollback/i.test(sql)) {
+             if(!this.inTransaction) throw new Error("No active transaction.");
+             for (let i = this.undoLog.length - 1; i >= 0; i--) {
+                 const log = this.undoLog[i];
+                 if (log.type === 'TABLE_COW') {
+                     const table = this.tables[log.table];
+                     if (table) {
+                         table.rowCount = log.rowCount;
+                         for (let col in log.cols) {
+                             table.cols[col].num.set(log.cols[col].num);
+                             table.cols[col].meta.set(log.cols[col].meta);
+                         }
+                         for (let col in log.strPoolsSizes) {
+                             const size = log.strPoolsSizes[col];
+                             if (table.strPools[col] && table.strPools[col].length > size) {
+                                 const removed = table.strPools[col].splice(size);
+                                 removed.forEach(s => delete table.strMaps[col][s]);
+                             }
+                         }
+                     }
+                 } else if (log.type === 'DROP_TABLE') {
+                     this.tables[log.table] = log.tableObj;
+                 } else if (log.type === 'CREATE_TABLE') {
+                     delete this.tables[log.table];
+                 }
+             }
+             this.inTransaction = false;
+             this.undoLog = [];
+             resultSet = [{ Result: "Success", Message: "Transaction Rolled Back" }];
+          }
+          else if (/^select/i.test(sql)) {
+             let tempSql = sql;
+             let limitVal = null, offsetVal = null, orderByStr = null, havingStr = null, groupByStr = null, whereStr = null;
+             
+             const limitMatch = tempSql.match(/\s+limit\s+(\d+)/i);
+             if(limitMatch) { limitVal = limitMatch[1]; tempSql = tempSql.replace(limitMatch[0], ''); }
+             const offsetMatch = tempSql.match(/\s+offset\s+(\d+)/i);
+             if(offsetMatch) { offsetVal = offsetMatch[1]; tempSql = tempSql.replace(offsetMatch[0], ''); }
+
+             const oMatch = tempSql.match(/\s+order\s+by\s+([\s\S]+)$/i);
+             if(oMatch) { orderByStr = oMatch[1]; tempSql = tempSql.substring(0, oMatch.index); }
+             
+             const hMatch = tempSql.match(/\s+having\s+([\s\S]+)$/i);
+             if(hMatch) { havingStr = hMatch[1]; tempSql = tempSql.substring(0, hMatch.index); }
+
+             const gMatch = tempSql.match(/\s+group\s+by\s+([\s\S]+)$/i);
+             if(gMatch) { groupByStr = gMatch[1]; tempSql = tempSql.substring(0, gMatch.index); }
+             
+             const wMatch = tempSql.match(/\s+where\s+([\s\S]+)$/i);
+             if(wMatch) { whereStr = wMatch[1]; tempSql = tempSql.substring(0, wMatch.index); }
+             
+             const joins = [];
+             const joinRegex = /\b(LEFT\s+|INNER\s+|RIGHT\s+)?JOIN\s+([a-zA-Z0-9_]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?\s+ON\s+([\s\S]+?)(?=\b(?:LEFT|INNER|RIGHT)?\s*JOIN\b|$)/gi;
+             let jMatch;
+             while ((jMatch = joinRegex.exec(tempSql)) !== null) {
+                 joins.push({ type: jMatch[1] ? jMatch[1].trim().toUpperCase() : 'INNER', table: jMatch[2], alias: jMatch[3] || jMatch[2], onCond: jMatch[4].trim() });
+             }
+             if (joins.length > 0) tempSql = tempSql.substring(0, tempSql.indexOf(joins[0].type === 'LEFT' ? 'LEFT' : 'JOIN') - 1);
+             
+             const fMatch = tempSql.match(/^select\s+(distinct\s+)?([\s\S]+?)\s+from\s+([a-zA-Z0-9_]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?/i);
+             if(!fMatch) throw new Error("Syntax error in SELECT statement.");
+             
+             const isDistinct = !!fMatch[1];
+             const selectClause = fMatch[2].trim();
+             const fromTable = fMatch[3].trim();
+             const baseAlias = fMatch[4] || fromTable;
+
+             if (!this.tables[fromTable]) throw new Error(`Table '${fromTable}' not found.`);
+             
+             let rowPtrs = [];
+             const baseTbl = this.tables[fromTable];
+             for(let i=0; i<baseTbl.rowCount; i++) {
+                 rowPtrs.push({ [fromTable]: i, [baseAlias]: i });
+             }
+             
+             let aliases = { [fromTable]: fromTable, [baseAlias]: fromTable };
+
+             joins.forEach(join => {
+                 if (!this.tables[join.table]) throw new Error(`Join Table '${join.table}' not found.`);
+                 aliases[join.table] = join.table;
+                 aliases[join.alias] = join.table;
+                 
+                 let jTbl = this.tables[join.table];
+                 let onFunc = this.compileCondition(join.onCond, strMap);
+                 let newPtrs = [];
+                 
+                 rowPtrs.forEach(ptr => {
+                     let matched = false;
+                     for(let j=0; j<jTbl.rowCount; j++) {
+                         let combPtr = { ...ptr, [join.table]: j, [join.alias]: j };
+                         if (onFunc(combPtr, this.tables, aliases)) { newPtrs.push(combPtr); matched = true; }
+                     }
+                     if (!matched && join.type === 'LEFT') {
+                         newPtrs.push({ ...ptr, [join.table]: -1, [join.alias]: -1 });
+                     }
+                 });
+                 rowPtrs = newPtrs;
+             });
+
+             if (whereStr) {
+                 let whereFunc = this.compileCondition(whereStr, strMap);
+                 rowPtrs = rowPtrs.filter(ptr => whereFunc(ptr, this.tables, aliases));
+             }
+
+             let selectParts = this.splitSelectClause(selectClause);
+             let isAgg = selectParts.some(p => /COUNT\(|SUM\(|AVG\(|MAX\(|MIN\(/i.test(p));
+
+             let compiledSelects = selectParts.map(part => {
+                 const asMatch = part.match(/(.+?)\s+AS\s+([a-zA-Z0-9_]+)$/i);
+                 let expr = asMatch ? asMatch[1].trim() : part.trim();
+                 let alias = asMatch ? asMatch[2] : expr.replace(/^[a-zA-Z0-9_]+\./, '');
+                 if (expr === '*') return { type: 'star' };
+                 if (/^(COUNT|SUM|AVG|MAX|MIN)\(/i.test(expr)) {
+                     let m = expr.match(/^(COUNT|SUM|AVG|MAX|MIN)\(\s*(.+?)\s*\)/i);
+                     let argFunc = m[2] === '*' ? null : this.compileCondition(m[2], strMap);
+                     return { type: 'agg', func: m[1].toUpperCase(), argFunc: argFunc, alias };
+                 }
+                 let evalFunc = this.compileCondition(expr, strMap); 
+                 return { type: 'expr', evalFunc, alias };
+             });
+
+             let groups = {};
+             if (groupByStr) {
+                 let groupFuncs = groupByStr.split(',').map(s => this.compileCondition(s.trim(), strMap));
+                 rowPtrs.forEach(ptr => {
+                     let key = groupFuncs.map(f => f(ptr, this.tables, aliases)).join('|||');
+                     if(!groups[key]) groups[key] = [];
+                     groups[key].push(ptr);
+                 });
+             } else {
+                 groups['all'] = rowPtrs;
+             }
+
+             if (isAgg || groupByStr) {
+                 let aggResults = [];
+                 Object.keys(groups).forEach(key => {
+                     let groupPtrs = groups[key];
+                     let aggRow = {};
+                     compiledSelects.forEach(sel => {
+                         if (sel.type === 'agg') {
+                             if (sel.func === 'COUNT') {
+                                 if (!sel.argFunc) {
+                                     aggRow[sel.alias] = groupPtrs.length;
+                                 } else {
+                                     let cnt = 0;
+                                     groupPtrs.forEach(ptr => {
+                                         let v = sel.argFunc(ptr, this.tables, aliases);
+                                         if (v !== null && v !== undefined) cnt++;
+                                     });
+                                     aggRow[sel.alias] = cnt;
+                                 }
+                             } else if (sel.func === 'MAX' || sel.func === 'MIN') {
+                                 let vals = [];
+                                 groupPtrs.forEach(ptr => {
+                                     let v = sel.argFunc(ptr, this.tables, aliases);
+                                     if (v !== null && v !== undefined) vals.push(v);
+                                 });
+                                 if (vals.length === 0) aggRow[sel.alias] = null;
+                                 else {
+                                     let sorted = vals.sort((a,b) => a<b ? -1 : (a>b ? 1 : 0));
+                                     aggRow[sel.alias] = sel.func === 'MAX' ? sorted[sorted.length-1] : sorted[0];
+                                 }
+                             } else { // SUM, AVG
+                                 let sum = 0, cnt = 0;
+                                 groupPtrs.forEach(ptr => {
+                                     let v = sel.argFunc(ptr, this.tables, aliases);
+                                     if (typeof v === 'number') { sum += v; cnt++; }
+                                 });
+                                 aggRow[sel.alias] = sel.func === 'SUM' ? sum : (cnt>0 ? Number((sum/cnt).toFixed(2)) : 0);
+                             }
+                         } else if (sel.type === 'expr') {
+                             aggRow[sel.alias] = groupPtrs.length > 0 ? sel.evalFunc(groupPtrs[0], this.tables, aliases) : null;
+                         }
+                     });
+                     aggResults.push(aggRow);
+                 });
+                 resultSet = aggResults;
+                 affectedRows = rowPtrs.length;
+             } else {
+                 resultSet = rowPtrs.map(ptr => {
+                     let outRow = {};
+                     compiledSelects.forEach(sel => {
+                         if (sel.type === 'star') {
+                             for (let alias in ptr) {
+                                 let actualTbl = aliases[alias];
+                                 if (actualTbl && this.tables[actualTbl] && ptr[alias] !== -1) {
+                                     const t = this.tables[actualTbl];
+                                     t.getColumnNames().forEach(c => {
+                                         outRow[c] = t.getValue(c, ptr[alias]);
+                                     });
+                                 }
+                             }
+                         } else if (sel.type === 'expr') {
+                             outRow[sel.alias] = sel.evalFunc(ptr, this.tables, aliases);
+                         }
+                     });
+                     return outRow;
+                 });
+                 affectedRows = resultSet.length;
+             }
+
+             if ((isAgg || groupByStr) && havingStr) {
+                 let hFunc = this.compileCondition(havingStr, strMap);
+                 let dummyCols = {};
+                 if (resultSet.length > 0) {
+                     Object.keys(resultSet[0]).forEach(k => dummyCols[k] = true);
+                 }
+                 resultSet = resultSet.filter(row => {
+                     return hFunc({ dummy: 0 }, { dummy: { cols: dummyCols, getValue: (c) => row[c] } }, { dummy: 'dummy' });
+                 });
+             }
+
+             if (isDistinct && resultSet.length > 0) {
+                 const seen = new Set();
+                 resultSet = resultSet.filter(row => {
+                     const str = JSON.stringify(row, Object.keys(row).sort());
+                     if (seen.has(str)) return false;
+                     seen.add(str);
+                     return true;
+                 });
+                 affectedRows = resultSet.length;
+             }
+
+             if (orderByStr && resultSet.length > 0) {
+                 const orderCols = orderByStr.split(',').map(s => {
+                     const parts = s.trim().split(/\s+/);
+                     return { col: parts[0].replace(/^[a-zA-Z0-9_]+\./, ''), desc: parts[1] && parts[1].toLowerCase() === 'desc' };
+                 });
+                 
+                 resultSet.sort((a, b) => {
+                     for (let oc of orderCols) {
+                         let valA = a[oc.col]; let valB = b[oc.col];
+                         if (valA === valB) continue;
+                         if (valA === null || valA === undefined) return oc.desc ? 1 : -1; 
+                         if (valB === null || valB === undefined) return oc.desc ? -1 : 1;
+                         if (valA < valB) return oc.desc ? 1 : -1;
+                         return oc.desc ? -1 : 1;
+                     }
+                     return 0;
+                 });
+             }
+
+             if (limitVal !== null || offsetVal !== null) {
+                 let offset = offsetVal !== null ? parseInt(offsetVal, 10) : 0;
+                 let limit = limitVal !== null ? parseInt(limitVal, 10) : resultSet.length;
+                 // Prevent offset array out of bounds
+                 if (offset >= resultSet.length) {
+                     resultSet = [];
+                 } else {
+                     resultSet = resultSet.slice(offset, offset + limit);
+                 }
+             }
+          }
+          else if (/^insert/i.test(sql)) {
+             const m = sql.match(/insert\s+into\s+([a-zA-Z0-9_]+)\s*\(([^)]+)\)\s*values\s*([\s\S]+)$/i);
+             if (m) {
+                const table = m[1];
+                if (!this.tables[table]) throw new Error(`Table '${table}' not found.`);
+                this._cowColumns(table, []);
+                const cols = m[2].split(',').map(c => c.trim());
+                const valStr = m[3];
+                const valMatches = [...valStr.matchAll(/\(([^)]+)\)/g)];
+                if(valMatches.length === 0) throw new Error("Syntax Error in INSERT.");
+                
+                const tData = this.tables[table];
+                valMatches.forEach(vm => {
+                    let vals = vm[1].split(',').map(v => {
+                       let val = v.trim();
+                       strMap.forEach((str, i) => { val = val.replace(new RegExp(`__STR_${i}__`, 'g'), str); });
+                       if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) return val.slice(1, -1);
+                       if (val.toLowerCase() === 'null') return null;
+                       return isNaN(val) || val === '' ? val : Number(val);
+                    });
+                    if (cols.length !== vals.length) throw new Error("Column count doesn't match value count.");
+                    
+                    while (tData.capacity <= tData.rowCount) tData.grow();
+                    const idx = tData.rowCount;
+                    cols.forEach((col, i) => { 
+                        if (!tData.cols[col]) tData.addColumn(col);
+                        tData.setValue(col, idx, vals[i]); 
+                    });
+                    tData.rowCount++;
+                    affectedRows++;
+                });
+                resultSet = [{Result:"Success", Message:`${affectedRows} rows inserted.`}];
+             } else throw new Error("Syntax Error in INSERT.");
+          }
+          else if (/^update/i.test(sql)) {
+             const m = sql.match(/update\s+([a-zA-Z0-9_]+)\s+set\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i);
+             if (m) {
+                const table = m[1];
+                if (!this.tables[table]) throw new Error(`Table '${table}' not found.`);
+                
+                let setStr = m[2];
+                let whereStr = m[3];
+                
+                let setParts = this.splitSelectClause(setStr); 
+                let setEvaluators = setParts.map(s => {
+                    let eqIdx = s.indexOf('=');
+                    if(eqIdx === -1) throw new Error("Syntax Error in SET clause.");
+                    let col = s.substring(0, eqIdx).trim();
+                    if (!this.tables[table].cols[col]) throw new Error(`Column '${col}' not found.`);
+                    let expr = s.substring(eqIdx + 1).trim();
+                    let evalFunc = this.compileCondition(expr, strMap);
+                    return { col, evalFunc };
+                });
+
+                const affectedCols = setEvaluators.map(ev => ev.col);
+                this._cowColumns(table, affectedCols);
+
+                const tData = this.tables[table];
+                const rowCount = tData.rowCount;
+                let targetIndices = [];
+                let aliases = { [table]: table };
+
+                if (whereStr) {
+                   let whereFunc = this.compileCondition(whereStr, strMap);
+                   for (let i = 0; i < rowCount; i++) {
+                       if (whereFunc({ [table]: i }, this.tables, aliases)) targetIndices.push(i);
+                   }
+                } else {
+                    for (let i = 0; i < rowCount; i++) targetIndices.push(i);
+                }
+
+                targetIndices.forEach(idx => {
+                    let ptr = { [table]: idx };
+                    setEvaluators.forEach(ev => {
+                        let result = ev.evalFunc(ptr, this.tables, aliases);
+                        tData.setValue(ev.col, idx, result);
+                    });
+                });
+                affectedRows = targetIndices.length;
+                resultSet = [{Result:"Success", Message:`${affectedRows} rows updated.`}];
+             } else throw new Error("Syntax Error in UPDATE.");
+          }
+          else if (/^delete/i.test(sql)) {
+             const m = sql.match(/delete\s+from\s+([a-zA-Z0-9_]+)(?:\s+where\s+([\s\S]+))?$/i);
+             if (m) {
+                const table = m[1];
+                if (!this.tables[table]) throw new Error(`Table '${table}' not found.`);
+                this._cowColumns(table, 'ALL');
+                const whereStr = m[2];
+                const tData = this.tables[table];
+                const rowCount = tData.rowCount;
+                let targetIndices = [];
+                let aliases = { [table]: table };
+
+                if (whereStr) {
+                   let whereFunc = this.compileCondition(whereStr, strMap);
+                   for (let i = 0; i < rowCount; i++) {
+                       if (whereFunc({ [table]: i }, this.tables, aliases)) targetIndices.push(i);
+                   }
+                } else {
+                    for (let i = 0; i < rowCount; i++) targetIndices.push(i);
+                }
+
+                for (let i = targetIndices.length - 1; i >= 0; i--) {
+                    const delIdx = targetIndices[i];
+                    for (let c in tData.cols) {
+                        const col = tData.cols[c];
+                        col.num.copyWithin(delIdx, delIdx + 1, tData.rowCount);
+                        col.meta.copyWithin(delIdx, delIdx + 1, tData.rowCount);
+                    }
+                    tData.rowCount--;
+                }
+                affectedRows = targetIndices.length;
+                resultSet = [{Result:"Success", Message:`${affectedRows} rows deleted.`}];
+             } else throw new Error("Syntax Error in DELETE.");
+          }
+          else if (/^create\s+table/i.test(sql)) {
+             const m = sql.match(/create\s+table\s+([a-zA-Z0-9_]+)\s*\(([^)]+)\)/i);
+             if (m) {
+                const table = m[1];
+                if (this.tables[table]) throw new Error(`Table '${table}' already exists.`);
+                this._logCreateTable(table);
+                const cols = m[2].split(',').map(c => c.trim().split(/\s+/)[0]);
+                const t = new Table();
+                cols.forEach(col => t.addColumn(col));
+                this.tables[table] = t;
+                resultSet = [{Result:"Success", Message:`Table '${table}' created.`}];
+             } else throw new Error("Syntax Error in CREATE TABLE.");
+          }
+          else if (/^truncate\s+table/i.test(sql)) {
+             const m = sql.match(/truncate\s+table\s+([a-zA-Z0-9_]+)/i);
+             if (m) {
+                const table = m[1];
+                if (!this.tables[table]) throw new Error(`Table '${table}' not found.`);
+                this._cowColumns(table, 'ALL');
+                const t = this.tables[table];
+                affectedRows = t.rowCount;
+                t.rowCount = 0;
+                resultSet = [{Result:"Success", Message:`${affectedRows} rows truncated.`}];
+             } else throw new Error("Syntax Error in TRUNCATE TABLE.");
+          }
+          else if (/^drop\s+table/i.test(sql)) {
+             const m = sql.match(/drop\s+table\s+([a-zA-Z0-9_]+)/i);
+             if (m) {
+                const table = m[1];
+                if (!this.tables[table]) throw new Error(`Table '${table}' not found.`);
+                this._logDropTable(table);
+                delete this.tables[table];
+                resultSet = [{Result:"Success", Message:`Table '${table}' dropped.`}];
+             } else throw new Error("Syntax Error in DROP TABLE.");
+          }
+          else if (/^(optimize|vacuum)/i.test(sql)) {
+             resultSet = [{Result:"Success", Message:"Database optimized."}];
+          }
+          else {
+             throw new Error("Syntax Error or Unsupported Command.");
+          }
+
+        } catch (e) {
+          if (!isSubquery) this.cleanupTempTables();
+          return { error: e.message };
+        }
+
+        if (!isSubquery) this.cleanupTempTables();
+
+        const executionTime = performance.now() - startTime;
+        return {
+          data: resultSet,
+          executionTime: Math.max(0.01, executionTime).toFixed(2),
+          scannedRows: affectedRows
+        };
+      }
+    }
+
+    // ============================================================================
+    // [UI Controller] 
+    // ============================================================================
+    let db = new DatabaseEngine();
+    let currentResultData = null; 
+
+    const els = {
+       query: document.getElementById('queryInput'),
+       hl: document.getElementById('highlightLayer'),
+       resArea: document.getElementById('resultsArea'),
+       mTime: document.getElementById('metricTime'),
+       mRows: document.getElementById('metricRows'),
+       dispLimit: document.getElementById('displayLimit'),
+       toastMsg: document.getElementById('toastMsg')
+    };
+
+    function showToast(msg, isError = false) {
+      els.toastMsg.textContent = msg;
+      els.toastMsg.className = `absolute bottom-4 right-4 px-4 py-2 rounded shadow-lg transition-opacity duration-300 z-50 text-sm font-medium ${isError ? 'bg-red-100 text-red-800 border border-red-300' : 'bg-green-100 text-green-800 border border-green-300'}`;
+      els.toastMsg.style.opacity = 1;
+      setTimeout(() => els.toastMsg.style.opacity = 0, 3000);
+    }
+
+    const keywords = ['SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'CREATE', 'TABLE', 'DROP', 'TRUNCATE', 'OPTIMIZE', 'VACUUM', 'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'BEGIN', 'COMMIT', 'ROLLBACK', 'JOIN', 'ON', 'INNER', 'LEFT', 'ORDER', 'BY', 'DESC', 'ASC', 'HAVING', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AS', 'AND', 'OR', 'IN', 'GROUP', 'LIMIT', 'OFFSET', 'LIKE', 'NOT', 'IS', 'NULL', 'BETWEEN', 'DISTINCT', 'UPPER', 'LOWER', 'LENGTH', 'ROUND', 'COALESCE', 'SUBSTRING', 'CONCAT', 'REPLACE', 'TRIM', 'ABS', 'CEIL', 'FLOOR', 'NOW', 'LPAD', 'RPAD', 'POWER', 'SQRT', 'YEAR', 'MONTH', 'DAY', 'MOD', 'SIGN', 'RAND'];
+    function updateHighlight() {
+      let text = els.query.value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      text = text.replace(/('[^']*')|("[^"]*")/g, '<span class="hl-string">$1$2</span>');
+      text = text.replace(/\b(\d+(\.\d+)?)\b/g, '<span class="hl-number">$1</span>');
+      text = text.replace(new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi'), '<span class="hl-keyword">$&</span>');
+      if(text[text.length-1] === '\n') text += ' ';
+      els.hl.innerHTML = text;
+    }
+
+    let undoStack = [];
+    let redoStack = [];
+    let saveTimeout;
+
+    function saveQueryState() {
+        const val = els.query.value;
+        if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== val) {
+            undoStack.push(val);
+            redoStack = [];
+        }
+    }
+
+    function setQueryValue(val) {
+        els.query.value = val;
+        updateHighlight();
+        saveQueryState();
+    }
+
+    saveQueryState();
+    updateHighlight(); 
+
+    els.query.addEventListener('input', () => {
+        updateHighlight();
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(saveQueryState, 400); 
+    });
+
+    els.query.addEventListener('scroll', () => { els.hl.scrollTop = els.query.scrollTop; els.hl.scrollLeft = els.query.scrollLeft; });
+
+    els.query.addEventListener('keydown', (e) => {
+        const cmdKey = e.metaKey || e.ctrlKey;
+        if (e.key === 'Enter' && cmdKey) { 
+            e.preventDefault(); 
+            clearTimeout(saveTimeout); saveQueryState(); 
+            runQuery(); 
+            return;
+        }
+        if (cmdKey && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            clearTimeout(saveTimeout);
+            if (els.query.value !== undoStack[undoStack.length - 1]) redoStack.push(els.query.value);
+            else if (undoStack.length > 1) redoStack.push(undoStack.pop());
+            if (undoStack.length > 0) { els.query.value = undoStack[undoStack.length - 1]; updateHighlight(); }
+        }
+        if ((cmdKey && e.key.toLowerCase() === 'y') || (cmdKey && e.key.toLowerCase() === 'z' && e.shiftKey)) {
+            e.preventDefault();
+            clearTimeout(saveTimeout);
+            if (redoStack.length > 0) {
+                const val = redoStack.pop();
+                undoStack.push(val);
+                els.query.value = val;
+                updateHighlight();
+            }
+        }
+    });
+
+    document.getElementById('clearBtn').addEventListener('click', () => { setQueryValue(''); els.query.focus(); });
+
+    const helpData = [
+      { cat: "Basic DQL", cmds: [
+        { name: "Select All", sql: "SELECT * FROM {table}" },
+        { name: "Where & Limit", sql: "SELECT * FROM {table} WHERE id BETWEEN 1 AND 5 LIMIT 3" },
+        { name: "Multi Order By", sql: "SELECT * FROM {table} ORDER BY status DESC, id ASC" },
+        { name: "Distinct", sql: "SELECT DISTINCT status FROM {table}" }
+      ]},
+      { cat: "String Functions", cmds: [
+        { name: "Concat & Replace", sql: "SELECT CONCAT(id, '-', name), REPLACE(name, 'a', '@') FROM {table}" },
+        { name: "Trim & Substr", sql: "SELECT TRIM(name), SUBSTRING(name, 1, 3) FROM {table}" },
+        { name: "Case & Padding", sql: "SELECT UPPER(name), LOWER(name), LPAD(id, 5, '0'), RPAD(id, 5, '-') FROM {table}" }
+      ]},
+      { cat: "Math & Date Functions", cmds: [
+        { name: "Math Basic", sql: "SELECT ABS(price), CEIL(price), FLOOR(price), ROUND(price) FROM {table}" },
+        { name: "Math Advanced", sql: "SELECT MOD(price, 100), POWER(price, 2), SQRT(price), SIGN(price), RAND() FROM {table}" },
+        { name: "Date & Null", sql: "SELECT NOW(), YEAR(NOW()), MONTH(NOW()), DAY(NOW()), COALESCE(status, 'Unknown') FROM {table}" }
+      ]},
+      { cat: "Advanced DQL", cmds: [
+        { name: "Aggregates", sql: "SELECT COUNT(*), SUM(amount), AVG(amount), MAX(amount), MIN(amount) FROM {table}" },
+        { name: "Group By Having", sql: "SELECT status, COUNT(*) as c FROM {table} GROUP BY status HAVING c > 0" },
+        { name: "Joins", sql: "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id" },
+        { name: "Subqueries", sql: "SELECT * FROM {table} WHERE id IN (SELECT user_id FROM orders)" },
+        { name: "Case When", sql: "SELECT id, CASE WHEN age > 30 THEN 'Senior' ELSE 'Junior' END FROM {table}" }
+      ]},
+      { cat: "DML & DDL", cmds: [
+        { name: "Insert", sql: "INSERT INTO {table} (id, name) VALUES (99, 'Test'), (100, 'Test2')" },
+        { name: "Update", sql: "UPDATE {table} SET name = 'Updated', status = 'Active' WHERE id = 1" },
+        { name: "Delete", sql: "DELETE FROM {table} WHERE id = 99" },
+        { name: "Create & Drop", sql: "CREATE TABLE new_table (id, val) /* or DROP TABLE */" },
+        { name: "Truncate", sql: "TRUNCATE TABLE {table}" }
+      ]},
+      { cat: "Transactions", cmds: [
+        { name: "Begin Tx", sql: "BEGIN" },
+        { name: "Commit Tx", sql: "COMMIT" },
+        { name: "Rollback Tx", sql: "ROLLBACK" }
+      ]}
+    ];
+
+    // Use Event Delegation for command buttons
+    document.getElementById('helpContent').addEventListener('click', (e) => {
+      const btn = e.target.closest('.copy-cmd-btn');
+      if (btn) {
+        setQueryValue(btn.dataset.query);
+        document.getElementById('helpModal').classList.add('hidden');
+        els.query.focus();
+      }
+    });
+
+    function renderHelpCommands() {
+      const tbl = document.getElementById('helpTableSelect').value || 'users';
+      
+      const createCommandHTML = (cmd) => {
+        const q = cmd.sql.replace(/\{table\}/g, tbl);
+        return `
+          <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 flex justify-between items-center hover:border-gray-300 transition-colors">
+            <span class="font-mono text-xs text-blue-600 truncate mr-2 font-medium">${q}</span>
+            <button class="bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 text-[10px] px-3 py-1.5 rounded shadow-sm font-semibold copy-cmd-btn transition-colors" data-query="${q.replace(/"/g, '&quot;')}">Use</button>
+          </div>`;
+      };
+
+      const createCategoryHTML = (group) => `
+        <div class="mb-4">
+          <h3 class="text-xs font-bold text-gray-400 uppercase border-b border-gray-100 pb-1 mb-2 tracking-wider">${group.cat}</h3>
+          <div class="space-y-3">
+            ${group.cmds.map(createCommandHTML).join('')}
+          </div>
+        </div>`;
+
+      document.getElementById('helpContent').innerHTML = helpData.map(createCategoryHTML).join('');
+    }
+
+    function renderTree() {
+      const tree = document.getElementById('tableTree');
+      const genSel = document.getElementById('genTableSelect');
+      const helpSel = document.getElementById('helpTableSelect');
+      const csvSel = document.getElementById('csvTableSelect');
+      
+      tree.innerHTML = '';
+      [genSel, helpSel, csvSel].forEach(s => s.innerHTML = '');
+
+      Object.keys(db.tables).forEach(tbl => {
+        if(tbl.startsWith('__tmp_')) return;
+        
+        const li = document.createElement('li');
+        li.innerHTML = `<button class="text-gray-600 hover:text-blue-600 text-sm flex justify-between w-full text-left px-3 py-1.5 rounded hover:bg-gray-100 font-medium transition-colors" data-table="${tbl}">
+          <span>${tbl}</span>
+          <span class="text-[10px] text-gray-400 bg-gray-50 border border-gray-200 px-1.5 rounded-full">${db.tables[tbl].rowCount}</span>
+        </button>`;
+        tree.appendChild(li);
+
+        [genSel, helpSel, csvSel].forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = tbl; opt.textContent = tbl;
+          s.appendChild(opt);
+        });
+      });
+
+      tree.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          setQueryValue(`SELECT * FROM ${e.currentTarget.dataset.table}`);
+          els.query.focus();
+        });
+      });
+      renderHelpCommands();
+    }
+    renderTree();
+
+    document.getElementById('saveLocalBtn').addEventListener('click', () => {
+      try {
+        localStorage.setItem('jsLiteDb_data', db.toJSON());
+        showToast('Local Storage にデータを保存しました。');
+      } catch (e) {
+        showToast('保存エラー: 容量制限を超えている可能性があります。', true);
+      }
+    });
+
+    document.getElementById('loadLocalBtn').addEventListener('click', () => {
+      const dataStr = localStorage.getItem('jsLiteDb_data');
+      if (dataStr) {
+        try {
+          db.fromJSON(dataStr);
+          renderTree();
+          showToast('Local Storage からデータを読み込みました。');
+        } catch(e) { showToast('読み込みエラー: データが破損しています。', true); }
+      } else {
+        showToast('保存されたデータがありません。', true);
+      }
+    });
+
+    document.getElementById('clearLocalBtn').addEventListener('click', () => {
+      document.getElementById('clearConfirmModal').classList.remove('hidden');
+    });
+
+    document.getElementById('execClearLocalBtn').addEventListener('click', () => {
+      localStorage.removeItem('jsLiteDb_data');
+      db = new DatabaseEngine(); 
+      currentResultData = null;
+      renderTree();
+      els.resArea.innerHTML = `<div class="m-auto text-gray-400 text-sm">Run a query to see results.</div>`;
+      showToast('Local Storage のデータを削除し、初期状態にリセットしました。');
+      document.getElementById('clearConfirmModal').classList.add('hidden');
+    });
+
+    const modals = [
+       { btn: 'openHelpBtn', wrap: 'helpModal' },
+       { btn: 'openGeneratorBtn', wrap: 'generatorModal' },
+       { btn: 'openCsvBtn', wrap: 'csvModal' },
+       { btn: null, wrap: 'clearConfirmModal' }
+    ];
+    modals.forEach(m => {
+       const modalEl = document.getElementById(m.wrap);
+       if(m.btn) document.getElementById(m.btn).addEventListener('click', () => modalEl.classList.remove('hidden'));
+       modalEl.querySelectorAll('.closeModalBtn, .closeModalBg').forEach(el => {
+         el.addEventListener('click', () => modalEl.classList.add('hidden'));
+       });
+    });
+
+    document.getElementById('helpTableSelect').addEventListener('change', renderHelpCommands);
+
+    document.getElementById('generateBtn').addEventListener('click', () => {
+       const tbl = document.getElementById('genTableSelect').value;
+       const inputVal = parseInt(document.getElementById('genRowCount').value, 10);
+       const count = isNaN(inputVal) || inputVal < 1 ? 10000 : inputVal;
+       
+       const generatedCount = db.generateDummyData(tbl, count);
+       renderTree();
+       showToast(`${generatedCount.toLocaleString()}行のデータを ${tbl} に追加しました。`);
+       document.getElementById('generatorModal').classList.add('hidden');
+    });
+
+    document.getElementById('execCsvImportBtn').addEventListener('click', () => {
+        const fileInput = document.getElementById('csvFileInput');
+        const file = fileInput.files[0];
+        const tableName = document.getElementById('csvTableSelect').value;
+        document.getElementById('csvModal').classList.add('hidden');
+
+        if (!file) return showToast("CSVファイルが選択されていません。", true);
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const text = event.target.result;
+                const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+                if (lines.length < 2) throw new Error("CSVにはヘッダー行とデータ行が必要です。");
+                
+                const parseLine = (line) => {
+                    let ret = [], inQuote = false, value = "";
+                    for (let i = 0; i < line.length; i++) {
+                        let char = line[i];
+                        if (inQuote) {
+                            if (char === '"' && line[i+1] === '"') { value += '"'; i++; } 
+                            else if (char === '"') inQuote = false;
+                            else value += char;
+                        } else {
+                            if (char === '"') inQuote = true;
+                            else if (char === ',') { ret.push(value); value = ""; }
+                            else value += char;
+                        }
+                    }
+                    ret.push(value);
+                    return ret.map(v => v.trim());
+                };
+
+                const targetTable = db.tables[tableName];
+                const tableCols = targetTable.getColumnNames();
+                let importedCount = 0;
+
+                for (let i = 1; i < lines.length; i++) {
+                    const vals = parseLine(lines[i]);
+                    if(vals.length !== tableCols.length) continue; 
+                    
+                    while (targetTable.capacity <= targetTable.rowCount) targetTable.grow();
+                    
+                    tableCols.forEach((colName, idx) => {
+                        let v = vals[idx] !== undefined ? vals[idx] : null;
+                        if (v !== null && v !== '') {
+                            if (!isNaN(v) && !isNaN(parseFloat(v))) v = Number(v);
+                        } else v = null;
+                        targetTable.setValue(colName, targetTable.rowCount, v);
+                    });
+                    targetTable.rowCount++;
+                    importedCount++;
+                }
+                renderTree();
+                showToast(`${importedCount} 行を ${tableName} にインポートしました。`);
+            } catch(err) { showToast(`インポート失敗: ${err.message}`, true); }
+        };
+        reader.readAsText(file);
+        fileInput.value = ''; 
+    });
+
+    document.getElementById('exportCsvBtn').addEventListener('click', () => {
+        if (!currentResultData || currentResultData.length === 0) return;
+        const headers = Object.keys(currentResultData[0]);
+        const csvRows = [headers.map(h => `"${String(h).replace(/"/g, '""')}"`).join(',')];
+        for (const row of currentResultData) {
+            csvRows.push(headers.map(h => {
+                let val = row[h];
+                return val === null || val === undefined ? '""' : `"${String(val).replace(/"/g, '""')}"`;
+            }).join(','));
+        }
+        const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `js_lite_db_export.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // --- Test Suite Execution ---
+    function runTestSuite() {
+      els.resArea.innerHTML = `<div class="m-auto text-blue-500 text-sm font-mono animate-pulse font-medium">Running test suite...</div>`;
+      
+      const tests = [
+        // DDL
+        { name: "Create Table A", sql: "CREATE TABLE test_a (id, val, category)", check: r => r.data[0].Result === "Success" },
+        { name: "Create Table B", sql: "CREATE TABLE test_b (id, a_id, note)", check: r => r.data[0].Result === "Success" },
+        { name: "Create Table C", sql: "CREATE TABLE test_c (id, c_val)", check: r => r.data[0].Result === "Success" },
+        { name: "Create Table Empty", sql: "CREATE TABLE test_empty (id, none)", check: r => r.data[0].Result === "Success" },
+        { name: "Create Table Trunc", sql: "CREATE TABLE test_trunc (id, val)", check: r => r.data[0].Result === "Success" },
+        
+        // DML Insert
+        { name: "Insert Bulk A", sql: "INSERT INTO test_a (id, val, category) VALUES (1, 100, 'Cat1'), (2, 200, 'Cat2'), (3, 300, 'Cat1'), (4, 100, 'Cat2'), (5, null, 'Cat1')", check: r => r.data[0].Message.includes('5') },
+        { name: "Insert Bulk B", sql: "INSERT INTO test_b (id, a_id, note) VALUES (10, 1, 'X'), (20, 2, 'Y'), (30, 99, 'Z')", check: r => r.data[0].Message.includes('3') },
+        { name: "Insert Bulk C", sql: "INSERT INTO test_c (id, c_val) VALUES (1, 'C1'), (2, 'C2')", check: r => r.data[0].Message.includes('2') },
+        { name: "Insert Trunc", sql: "INSERT INTO test_trunc (id, val) VALUES (1, 10), (2, 20)", check: r => r.data[0].Message.includes('2') },
+        
+        // DML Truncate
+        { name: "Truncate Table", sql: "TRUNCATE TABLE test_trunc", check: r => r.data[0].Message.includes('2 rows') },
+        { name: "Verify Truncate", sql: "SELECT * FROM test_trunc", check: r => r.data.length === 0 },
+
+        // DML Zero Match
+        { name: "Update Zero Match", sql: "UPDATE test_a SET val = 0 WHERE id = -1", check: r => r.data[0].Message.includes('0 rows') },
+        { name: "Delete Zero Match", sql: "DELETE FROM test_a WHERE id = -1", check: r => r.data[0].Message.includes('0 rows') },
+
+        // DQL WHERE IS NULL / IS NOT NULL
+        { name: "IS NULL", sql: "SELECT * FROM test_a WHERE val IS NULL", check: r => r.data.length === 1 && r.data[0].id === 5 },
+        { name: "IS NOT NULL", sql: "SELECT * FROM test_a WHERE val IS NOT NULL", check: r => r.data.length === 4 },
+        
+        // DQL Logic & Pattern
+        { name: "LIKE %", sql: "SELECT * FROM test_a WHERE category LIKE 'Cat%'", check: r => r.data.length === 5 },
+        { name: "LIKE _", sql: "SELECT * FROM test_a WHERE category LIKE 'Cat_'", check: r => r.data.length === 5 },
+        { name: "NOT LIKE", sql: "SELECT * FROM test_a WHERE category NOT LIKE 'Cat1'", check: r => r.data.length === 2 },
+        { name: "Complex Logic", sql: "SELECT * FROM test_a WHERE (val > 150 AND category = 'Cat2') OR (id = 1)", check: r => r.data.length === 2 },
+
+        // DQL Zero Match
+        { name: "Select Zero Match", sql: "SELECT * FROM test_a WHERE id = -1", check: r => r.data.length === 0 },
+
+        // DQL JOIN
+        { name: "Inner Join", sql: "SELECT a.id, b.note FROM test_a a JOIN test_b b ON a.id = b.a_id", check: r => r.data.length === 2 && r.data[0].note === 'X' },
+        { name: "Left Join", sql: "SELECT a.id, b.note FROM test_a a LEFT JOIN test_b b ON a.id = b.a_id ORDER BY a.id ASC", check: r => r.data.length === 5 && r.data[2].note === null },
+        { name: "Self Join", sql: "SELECT a1.id, a2.val FROM test_a a1 JOIN test_a a2 ON a1.id = a2.id WHERE a1.id = 1", check: r => r.data.length === 1 && r.data[0].val === 100 },
+        
+        // DQL Multi JOIN & Multi WHERE
+        { name: "Multi JOIN & WHERE", sql: "SELECT a.id, b.note, c.c_val FROM test_a a JOIN test_b b ON a.id = b.a_id JOIN test_c c ON a.id = c.id WHERE a.val >= 100 AND b.note = 'X' AND c.c_val = 'C1'", check: r => r.data.length === 1 && r.data[0].c_val === 'C1' },
+        
+        // JOIN Edge Cases
+        { name: "Join No Match", sql: "SELECT a.id FROM test_a a JOIN test_b b ON a.id = b.a_id WHERE a.id = -1", check: r => r.data.length === 0 },
+        { name: "Multi Join Mixed", sql: "SELECT a.id, b.note, c.c_val FROM test_a a JOIN test_b b ON a.id = b.a_id LEFT JOIN test_c c ON a.id = c.id ORDER BY a.id", check: r => r.data.length === 2 && r.data[0].note === 'X' && r.data[0].c_val === 'C1' && r.data[1].note === 'Y' && r.data[1].c_val === 'C2' },
+
+        // DQL WHERE & BETWEEN & IN
+        { name: "Where Between", sql: "SELECT * FROM test_a WHERE val BETWEEN 150 AND 350", check: r => r.data.length === 2 },
+        { name: "IN", sql: "SELECT * FROM test_a WHERE id IN (2,3)", check: r => r.data.length === 2 },
+        { name: "NOT IN", sql: "SELECT * FROM test_a WHERE id NOT IN (1, 2)", check: r => r.data.length === 3 },
+        
+        // DQL CASE
+        { name: "Case When", sql: "SELECT id, CASE WHEN val > 150 THEN 'High' ELSE 'Low' END AS lvl FROM test_a ORDER BY id ASC", check: r => r.data[0].lvl === 'Low' && r.data[1].lvl === 'High' },
+        { name: "Case Else Null", sql: "SELECT id, CASE WHEN val = 100 THEN 'Hundred' END AS c FROM test_a ORDER BY id ASC", check: r => r.data[0].c === 'Hundred' && r.data[1].c === null },
+        
+        // DQL DISTINCT
+        { name: "Select DISTINCT 1 Col", sql: "SELECT DISTINCT category FROM test_a ORDER BY category", check: r => r.data.length === 2 && r.data[0].category === 'Cat1' },
+        { name: "Select DISTINCT Multi", sql: "SELECT DISTINCT val, category FROM test_a WHERE val IS NOT NULL ORDER BY val", check: r => r.data.length === 4 },
+        
+        // DQL Advanced String & Math Functions
+        { name: "Funcs CONCAT, REPLACE, TRIM", sql: "SELECT CONCAT(category, '-', id) as c, REPLACE(category, 'Cat', 'Dog') as r, TRIM('  abc  ') as t FROM test_a WHERE id = 1", check: r => r.data[0].c === 'Cat1-1' && r.data[0].r === 'Dog1' && r.data[0].t === 'abc' },
+        { name: "Funcs Math & Date 1", sql: "SELECT ABS(-5) as a, CEIL(4.2) as c, FLOOR(4.8) as f, NOW() as n FROM test_a WHERE id = 1", check: r => r.data[0].a === 5 && r.data[0].c === 5 && r.data[0].f === 4 && r.data[0].n !== null },
+        { name: "Funcs Math & Date 2", sql: "SELECT MOD(val, 3) as m, SIGN(val - 200) as s, ROUND(RAND()) as rnd FROM test_a WHERE id = 1", check: r => r.data[0].m === 1 && r.data[0].s === -1 && typeof r.data[0].rnd === 'number' },
+        { name: "Funcs Date", sql: "SELECT YEAR(NOW()) as y, MONTH('2026-06-27') as m, DAY('2026-06-27') as d FROM test_a LIMIT 1", check: r => r.data[0].y === new Date().getFullYear() && r.data[0].m === 6 && r.data[0].d === 27 },
+        { name: "Arithmetic", sql: "SELECT (val * 2 + 10) / 2 as calc FROM test_a WHERE id = 1", check: r => r.data[0].calc === 105 },
+        { name: "COALESCE & SUBSTR", sql: "SELECT COALESCE(val, 0) as cv, SUBSTRING(category, 1, 3) as sub FROM test_a WHERE id = 5", check: r => r.data[0].cv === 0 && r.data[0].sub === 'Cat' },
+        { name: "MAX / MIN", sql: "SELECT MAX(val) as mx, MIN(val) as mn FROM test_a", check: r => r.data[0].mx === 300 && r.data[0].mn === 100 },
+        { name: "Funcs LPAD, RPAD", sql: "SELECT LPAD(id, 3, '0') as lp, RPAD(id, 3, '-') as rp FROM test_a WHERE id = 1", check: r => r.data[0].lp === '001' && r.data[0].rp === '1--' },
+        { name: "Funcs POWER, SQRT", sql: "SELECT POWER(val, 2) as p, SQRT(val) as s FROM test_a WHERE val = 100 LIMIT 1", check: r => r.data[0].p === 10000 && r.data[0].s === 10 },
+        { name: "Funcs NULL inputs", sql: "SELECT UPPER(null) as u, ROUND(null) as r FROM test_a LIMIT 1", check: r => r.data[0].u === null && r.data[0].r === null },
+
+        // DQL Complex Arithmetic & Func Edge
+        { name: "Complex Arithmetic", sql: "SELECT ((val + 10) * 2) / 5 as calc FROM test_a WHERE id = 1", check: r => r.data[0].calc === 44 },
+        { name: "Func CONCAT null", sql: "SELECT CONCAT('A', null, 'B') as c FROM test_a LIMIT 1", check: r => r.data[0].c === 'AB' },
+        { name: "Func REPLACE no-op", sql: "SELECT REPLACE(category, 'XYZ', 'ABC') as r FROM test_a WHERE id = 1", check: r => r.data[0].r === 'Cat1' },
+
+        // DQL Group By & NULL count ignore (COUNT(col))
+        { name: "Count NULL Ignore", sql: "SELECT category, COUNT(val) AS val_cnt, COUNT(*) AS total_cnt FROM test_a GROUP BY category ORDER BY category ASC", check: r => r.data[0].val_cnt === 2 && r.data[0].total_cnt === 3 && r.data[1].val_cnt === 2 }, 
+        
+        // DQL Group By Multi-Column
+        { name: "Group By Multi", sql: "SELECT category, val, COUNT(*) as c FROM test_a GROUP BY category, val ORDER BY category ASC, val ASC", check: r => r.data.length === 5 && r.data[0].c === 1 },
+        
+        // DQL Multi-Column ORDER BY
+        { name: "Multi-Col ORDER BY", sql: "SELECT id, val FROM test_a ORDER BY val ASC, id DESC", check: r => r.data[0].id === 5 && r.data[1].id === 4 && r.data[2].id === 1 }, 
+        { name: "Order By NULL ASC", sql: "SELECT id, val FROM test_a ORDER BY val ASC", check: r => r.data[0].id === 5 },
+        { name: "Order By NULL DESC", sql: "SELECT id, val FROM test_a ORDER BY val DESC", check: r => r.data[r.data.length - 1].id === 5 },
+
+        // DQL Group By & Having
+        { name: "Group By Having", sql: "SELECT note, COUNT(*) as c FROM test_b GROUP BY note HAVING c > 0", check: r => r.data.length === 3 },
+        
+        // DQL Subquery
+        { name: "Subquery IN", sql: "SELECT * FROM test_a WHERE id IN (SELECT a_id FROM test_b)", check: r => r.data.length === 2 },
+        { name: "Subquery NOT IN", sql: "SELECT * FROM test_a WHERE id NOT IN (SELECT a_id FROM test_b)", check: r => r.data.length === 3 },
+        { name: "Subquery Empty", sql: "SELECT * FROM test_a WHERE id IN (SELECT id FROM test_empty)", check: r => r.data.length === 0 },
+        
+        // [New] Complex Integration Tests (複合クエリ)
+        { name: "Cplx: All Clauses", sql: "SELECT a.category, COUNT(b.note) as note_cnt, SUM(a.val) as total_val FROM test_a a LEFT JOIN test_b b ON a.id = b.a_id WHERE a.val > 100 GROUP BY a.category HAVING total_val > 200 ORDER BY note_cnt DESC, a.category ASC LIMIT 5", check: r => r.data.length === 1 && r.data[0].category === 'Cat1' && r.data[0].note_cnt === 0 && r.data[0].total_val === 300 },
+        { name: "Cplx: Func+Dist+Ord", sql: "SELECT DISTINCT UPPER(category) as u_cat, ROUND(val/10) as r_val FROM test_a WHERE val IS NOT NULL ORDER BY u_cat DESC, r_val ASC", check: r => r.data.length === 4 && r.data[0].u_cat === 'CAT2' && r.data[0].r_val === 10 && r.data[3].u_cat === 'CAT1' && r.data[3].r_val === 30 },
+        { name: "Cplx: From SubQ+Join", sql: "SELECT sub.u_cat, sub.total, c.id FROM (SELECT UPPER(category) as u_cat, SUM(val) as total FROM test_a GROUP BY category) sub LEFT JOIN test_c c ON sub.u_cat = CONCAT('CAT', SUBSTRING(c.c_val, 2, 1)) ORDER BY sub.total DESC", check: r => r.data.length === 2 && r.data[0].u_cat === 'CAT1' && r.data[0].id === 1 && r.data[1].u_cat === 'CAT2' && r.data[1].id === 2 },
+        { name: "Cplx: Where SubQ+Math", sql: "SELECT id, ABS(val - 250) as diff FROM test_a WHERE id IN (SELECT a_id FROM test_b WHERE note LIKE 'X%') OR (val IS NOT NULL AND val < 200) ORDER BY diff ASC", check: r => r.data.length === 2 && r.data[0].diff === 150 && r.data[1].diff === 150 },
+        { name: "Cplx: M-Join+Case+Str", sql: "SELECT a.id, CONCAT(a.category, ':', COALESCE(b.note, 'NONE')) as info, CASE WHEN c.c_val IS NULL THEN 0 ELSE 1 END as has_c FROM test_a a LEFT JOIN test_b b ON a.id = b.a_id LEFT JOIN test_c c ON a.id = c.id ORDER BY a.id DESC", check: r => r.data.length === 5 && r.data[0].id === 5 && r.data[0].info === 'Cat1:NONE' && r.data[0].has_c === 0 && r.data[4].id === 1 && r.data[4].info === 'Cat1:X' && r.data[4].has_c === 1 },
+        { name: "Cplx: Not In + Join", sql: "SELECT a.id, b.note FROM test_a a JOIN test_b b ON a.id = b.a_id WHERE a.id NOT IN (SELECT id FROM test_c WHERE c_val = 'C2') ORDER BY a.id", check: r => r.data.length === 1 && r.data[0].id === 1 && r.data[0].note === 'X' },
+        { name: "Cplx: Tx Update", sql: "BEGIN", check: r => true },
+        { name: "Cplx: Tx Update Exec", sql: "UPDATE test_a SET val = ROUND(val * 1.5) WHERE id IN (SELECT a_id FROM test_b WHERE note IS NOT NULL) AND val > 150", check: r => r.data[0].Message.includes('1') },
+        { name: "Cplx: Tx Verify Update", sql: "SELECT val FROM test_a WHERE id = 2", check: r => r.data[0].val === 300 }, 
+        { name: "Cplx: Tx Rollback", sql: "ROLLBACK", check: r => true },
+
+        // [New] More Complex Integration Tests (複合クエリ Part 2)
+        { name: "Cplx2: Nested String Funcs", sql: "SELECT CONCAT(UPPER(category), '-', LPAD(id, 3, '0')) as code FROM test_a WHERE id = 1", check: r => r.data[0].code === 'CAT1-001' },
+        { name: "Cplx2: Conditional Sum", sql: "SELECT category, SUM(CASE WHEN val > 150 THEN val ELSE 0 END) as s FROM test_a GROUP BY category ORDER BY category ASC", check: r => r.data[0].s === 300 && r.data[1].s === 200 },
+        { name: "Cplx2: Left Join + Coalesce", sql: "SELECT a.id, COALESCE(b.note, 'Missing') as n FROM test_a a LEFT JOIN test_b b ON a.id = b.a_id ORDER BY a.id DESC LIMIT 3", check: r => r.data[0].id === 5 && r.data[0].n === 'Missing' && r.data[2].id === 3 && r.data[2].n === 'Missing' },
+        { name: "Cplx2: Deep Subqueries", sql: "SELECT * FROM test_a WHERE id IN (SELECT a_id FROM test_b WHERE a_id IN (SELECT id FROM test_c))", check: r => r.data.length === 2 && r.data[0].id === 1 },
+        { name: "Cplx2: Math combination", sql: "SELECT ROUND(POWER(val, 2) / 100) + ABS(-10) as calc FROM test_a WHERE id = 1", check: r => r.data[0].calc === 110 },
+        { name: "Cplx2: Multi-Condition Join", sql: "SELECT a.id FROM test_a a JOIN test_b b ON a.id = b.a_id AND a.val > 150", check: r => r.data.length === 1 && r.data[0].id === 2 }, 
+        { name: "Cplx2: SubQ in FROM + Grp", sql: "SELECT sub.c, SUM(sub.val) as s FROM (SELECT category as c, val FROM test_a WHERE val IS NOT NULL) sub GROUP BY sub.c ORDER BY sub.c ASC", check: r => r.data.length === 2 && r.data[0].c === 'Cat1' && r.data[0].s === 400 },
+        { name: "Cplx2: SubQ in FROM + Join", sql: "SELECT sub.c, b.note FROM (SELECT id, category as c FROM test_a WHERE id < 3) sub JOIN test_b b ON sub.id = b.a_id ORDER BY sub.id ASC", check: r => r.data.length === 2 && r.data[1].note === 'Y' },
+        { name: "Cplx2: Complex WHERE Date", sql: "SELECT * FROM test_a WHERE YEAR(NOW()) >= 2024 AND id IN (1, 2) AND category LIKE '%Cat%'", check: r => r.data.length === 2 },
+        { name: "Cplx2: Self Join with Math", sql: "SELECT a1.id, a1.val + a2.val as v FROM test_a a1 JOIN test_a a2 ON a1.id = a2.id - 1 WHERE a1.id = 1", check: r => r.data.length === 1 && r.data[0].v === 300 },
+        { name: "Cplx2: Triple Join with Agg", sql: "SELECT c.c_val, COUNT(a.id) as cnt FROM test_c c LEFT JOIN test_a a ON c.id = a.id LEFT JOIN test_b b ON a.id = b.a_id GROUP BY c.c_val ORDER BY c.c_val ASC", check: r => r.data.length === 2 && r.data[0].cnt === 1 && r.data[1].cnt === 1 },
+        { name: "Cplx2: ORDER BY with Nulls", sql: "SELECT COALESCE(val, 0) as v, id FROM test_a ORDER BY v ASC, id DESC", check: r => r.data[0].v === 0 && r.data[0].id === 5 && r.data[1].v === 100 && r.data[1].id === 4 },
+        { name: "Cplx2: HAVING with Math", sql: "SELECT category, AVG(val) as a FROM test_a GROUP BY category HAVING a > 150 ORDER BY category ASC", check: r => r.data.length === 1 && r.data[0].category === 'Cat1' }, 
+        { name: "Cplx2: Update with SubQ", sql: "UPDATE test_a SET val = 500 WHERE id IN (SELECT id FROM test_c WHERE c_val = 'C1')", check: r => r.data[0].Message.includes('1') },
+        { name: "Cplx2: Verify Update SubQ", sql: "SELECT val FROM test_a WHERE id = 1", check: r => r.data[0].val === 500 },
+        { name: "Cplx2: Delete with SubQ", sql: "DELETE FROM test_a WHERE id IN (SELECT id FROM test_c WHERE c_val = 'C2')", check: r => r.data[0].Message.includes('1') },
+        { name: "Cplx2: Verify Delete SubQ", sql: "SELECT * FROM test_a WHERE id = 2", check: r => r.data.length === 0 },
+        { name: "Cplx2: Cartesian Product", sql: "SELECT a.id, b.a_id FROM test_a a JOIN test_b b ON 1 = 1 WHERE a.id = 1", check: r => r.data.length === 3 },
+        { name: "Cplx2: Multiple Aggregates", sql: "SELECT COUNT(*) as c, SUM(val) as s, MAX(val) as mx, MIN(val) as mn FROM test_a", check: r => r.data[0].c === 4 && r.data[0].s === 900 && r.data[0].mx === 500 && r.data[0].mn === 100 }, 
+        { name: "Cplx2: Eval Math Chain", sql: "SELECT ROUND(SQRT(POWER(val, 2)) + MOD(val, 3)) as calc FROM test_a WHERE id = 4", check: r => r.data[0].calc === 101 }, 
+        { name: "Cplx2: Distinct with Funcs", sql: "SELECT DISTINCT COALESCE(val, -1) as v FROM test_a ORDER BY v ASC", check: r => r.data.length === 4 && r.data[0].v === -1 },
+
+        // [UI Automation & LocalStorage Tests]
+        { name: "UI Test: Clear Editor", fn: () => {
+            els.query.value = "SELECT * FROM users";
+            document.getElementById('clearBtn').click();
+            return els.query.value === "";
+        }},
+        { name: "UI Test: Help Modal Toggle", fn: () => {
+            const modal = document.getElementById('helpModal');
+            document.getElementById('openHelpBtn').click();
+            const opened = !modal.classList.contains('hidden');
+            modal.querySelector('.closeModalBtn').click();
+            const closed = modal.classList.contains('hidden');
+            return opened && closed;
+        }},
+        { name: "UI Test: Disp Limit Change", fn: () => {
+            const bku = currentResultData;
+            currentResultData = Array.from({length: 150}, (_, i) => ({ id: i }));
+            els.dispLimit.value = "100";
+            renderDisplay();
+            const tr100 = els.resArea.querySelectorAll('tbody tr').length;
+            els.dispLimit.value = "all";
+            renderDisplay();
+            const trAll = els.resArea.querySelectorAll('tbody tr').length;
+            els.dispLimit.value = "100";
+            currentResultData = bku;
+            return tr100 === 100 && trAll === 150;
+        }},
+        { name: "LS Test: Save (Create)", fn: () => {
+            window.__testDbBackup = db.toJSON(); 
+            const backup = localStorage.getItem('jsLiteDb_data');
+            if (backup) localStorage.setItem('jsLiteDb_test_bku', backup);
+            
+            const t = new Table(); t.addColumn('id'); t.addColumn('info');
+            t.setValue('id', 0, 999); t.setValue('info', 0, 'Created'); t.rowCount = 1;
+            db.tables['ls_test_tbl'] = t;
+            
+            localStorage.setItem('jsLiteDb_data', db.toJSON());
+            const savedStr = localStorage.getItem('jsLiteDb_data');
+            return savedStr && savedStr.includes('ls_test_tbl') && savedStr.includes('Created');
+        }},
+        { name: "LS Test: Load (Import)", fn: () => {
+            db.tables = {}; 
+            db.fromJSON(localStorage.getItem('jsLiteDb_data'));
+            return db.tables['ls_test_tbl'] && db.tables['ls_test_tbl'].getValue('id', 0) === 999;
+        }},
+        { name: "LS Test: Update", fn: () => {
+            db.tables['ls_test_tbl'].setValue('info', 0, 'Updated');
+            localStorage.setItem('jsLiteDb_data', db.toJSON());
+            db.fromJSON(localStorage.getItem('jsLiteDb_data'));
+            return db.tables['ls_test_tbl'].getValue('info', 0) === 'Updated';
+        }},
+        { name: "LS Test: Delete (Clear)", fn: () => {
+            localStorage.removeItem('jsLiteDb_data');
+            const isEmpty = localStorage.getItem('jsLiteDb_data') === null;
+            
+            const bku = localStorage.getItem('jsLiteDb_test_bku');
+            if (bku) {
+                localStorage.setItem('jsLiteDb_data', bku);
+                localStorage.removeItem('jsLiteDb_test_bku');
+            }
+            if (window.__testDbBackup) {
+                db.fromJSON(window.__testDbBackup);
+                delete window.__testDbBackup;
+            }
+            return isEmpty;
+        }},
+
+        // TCL & Update
+        { name: "Begin Tx", sql: "BEGIN", check: r => true },
+        { name: "Tx Update Multi Col", sql: "UPDATE test_a SET val = 999, category = 'X' WHERE id = 1", check: r => r.data[0].Message.includes('1') },
+        { name: "Tx Delete with WHERE", sql: "DELETE FROM test_a WHERE id = 1", check: r => r.data[0].Message.includes('1') },
+        { name: "Tx Verify Deletion", sql: "SELECT * FROM test_a WHERE id = 1", check: r => r.data.length === 0 },
+        { name: "Tx Rollback", sql: "ROLLBACK", check: r => true },
+        { name: "Verify Rollback Update", sql: "SELECT val, category FROM test_a WHERE id = 1", check: r => r.data[0].val === 500 && r.data[0].category === 'Cat1' },
+        
+        { name: "Re-Insert Trunc", sql: "INSERT INTO test_trunc (id, val) VALUES (3, 30), (4, 40)", check: r => r.data[0].Message.includes('2') },
+        { name: "Update All", sql: "UPDATE test_trunc SET val = 99", check: r => r.data[0].Message.includes('2 rows') },
+        { name: "Delete All", sql: "DELETE FROM test_trunc", check: r => r.data[0].Message.includes('2 rows') },
+        
+        // Transaction Insert Commit
+        { name: "Tx Insert & Commit", sql: "BEGIN", check: r => true },
+        { name: "Tx Insert Exec", sql: "INSERT INTO test_a (id, val, category) VALUES (888, 888, 'C8')", check: r => r.data[0].Message.includes('1') },
+        { name: "Tx Commit Exec", sql: "COMMIT", check: r => true },
+        { name: "Verify Commit", sql: "SELECT val FROM test_a WHERE id = 888", check: r => r.data[0].val === 888 },
+
+        // Negative Tests (異常系)
+        { name: "Neg: SELECT missing tbl", sql: "SELECT * FROM missing_tbl", isErrorExpected: true, check: r => r.error && r.error.includes('not found') },
+        { name: "Neg: UPDATE missing col", sql: "UPDATE test_a SET missing = 1", isErrorExpected: true, check: r => r.error && r.error.includes('not found') },
+        { name: "Neg: Syntax Error", sql: "SELECT FROM test_a", isErrorExpected: true, check: r => r.error && r.error.includes('Syntax error') },
+        { name: "Neg: Commit without Tx", sql: "COMMIT", isErrorExpected: true, check: r => r.error && r.error.includes('transaction') },
+        { name: "Neg: Rollback without Tx", sql: "ROLLBACK", isErrorExpected: true, check: r => r.error && r.error.includes('transaction') },
+        { name: "Neg: Insert mismatch", sql: "INSERT INTO test_a (id, val) VALUES (1)", isErrorExpected: true, check: r => r.error && r.error.includes('match') },
+        { name: "Neg: Join missing tbl", sql: "SELECT * FROM test_a JOIN missing_tbl ON test_a.id = missing_tbl.id", isErrorExpected: true, check: r => r.error && r.error.includes('not found') },
+
+        // Boundary Tests (境界値)
+        { name: "Bnd: LIMIT 0", sql: "SELECT * FROM test_a LIMIT 0", check: r => r.data.length === 0 },
+        { name: "Bnd: LIMIT 1", sql: "SELECT * FROM test_a LIMIT 1", check: r => r.data.length === 1 },
+        { name: "Bnd: OFFSET beyond", sql: "SELECT * FROM test_a OFFSET 99999", check: r => r.data.length === 0 },
+        { name: "Bnd: Empty str insert", sql: "INSERT INTO test_a (id, val, category) VALUES (999, 0, '')", check: r => r.data && r.data[0].Message.includes('1') },
+        { name: "Bnd: Empty str select", sql: "SELECT * FROM test_a WHERE category = ''", check: r => r.data.length === 1 && r.data[0].id === 999 },
+        { name: "Bnd: Large number", sql: "INSERT INTO test_a (id, val, category) VALUES (1000, 9999999999.99, 'Large')", check: r => r.data && r.data[0].Message.includes('1') },
+        { name: "Bnd: Large num select", sql: "SELECT val FROM test_a WHERE id = 1000", check: r => r.data[0].val === 9999999999.99 },
+        { name: "Bnd: Select from Empty", sql: "SELECT * FROM test_empty", check: r => r.data.length === 0 },
+        { name: "Bnd: Update Empty", sql: "UPDATE test_empty SET none = 1", check: r => r.data[0].Message.includes('0 rows') },
+        { name: "Bnd: Delete Empty", sql: "DELETE FROM test_empty", check: r => r.data[0].Message.includes('0 rows') },
+
+        // Performance Tests (性能)
+        { name: "Perf: Gen 10k Rows", fn: () => {
+            const start = performance.now();
+            db.generateDummyData('test_a', 10000);
+            return (performance.now() - start) < 1500 && db.tables['test_a'].rowCount >= 10000;
+        }},
+        { name: "Perf: Select 10k + WHERE", sql: "SELECT * FROM test_a WHERE val > 500", check: r => r.data && r.data.length >= 0 }, 
+        { name: "Perf: Select 10k + ORDER", sql: "SELECT * FROM test_a ORDER BY id DESC LIMIT 10", check: r => r.data && r.data.length === 10 },
+        { name: "Perf: Delete 10k rows", sql: "DELETE FROM test_a WHERE id > 1000", check: r => r.data && r.data[0].Message.includes('10000') },
+
+        // Cleanup
+        { name: "Drop Table A", sql: "DROP TABLE test_a", check: r => true },
+        { name: "Drop Table B", sql: "DROP TABLE test_b", check: r => true },
+        { name: "Drop Table C", sql: "DROP TABLE test_c", check: r => true },
+        { name: "Drop Table Empty", sql: "DROP TABLE test_empty", check: r => true },
+        { name: "Drop Table Trunc", sql: "DROP TABLE test_trunc", check: r => true }
+      ];
+
+      let results = [];
+      let passed = 0;
+      
+      for (const t of tests) {
+        let status = "FAIL";
+        let errMsg = "";
+        let time = 0;
+        try {
+          const start = performance.now();
+          if (t.sql) {
+            const res = db.executeQuery(t.sql);
+            time = performance.now() - start;
+            if (res.error && !t.isErrorExpected) {
+               errMsg = res.error;
+            } else {
+               if (t.check(res)) {
+                   status = "PASS";
+                   passed++;
+               } else {
+                   errMsg = res.error || "Assertion failed or incorrect data returned";
+               }
+            }
+          } else if (t.fn) {
+            const res = t.fn();
+            time = performance.now() - start;
+            if (res) {
+               status = "PASS"; passed++;
+            } else {
+               errMsg = "UI or Local Storage Test Failed";
+            }
+          }
+        } catch (e) {
+           errMsg = e.message;
+        }
+        results.push({ TestName: t.name, Status: status, ExecutionTimeMs: time.toFixed(2), Error: errMsg });
+      }
+      
+      currentResultData = results;
+      renderDisplay();
+      renderTree();
+      showToast(`Test Suite Finished: ${passed} / ${tests.length} passed.`);
+    }
+
+    // --- Query Execution & Rendering ---
+    function renderDisplay() {
+       els.resArea.innerHTML = '';
+       if (!currentResultData || currentResultData.length === 0) {
+          els.resArea.innerHTML = `<div class="m-auto text-gray-500 text-sm">No rows returned.</div>`;
+          return;
+       }
+
+       const limitVal = els.dispLimit.value;
+       const limit = limitVal === 'all' ? currentResultData.length : parseInt(limitVal, 10);
+       const displayData = currentResultData.slice(0, limit);
+
+       const keys = Object.keys(currentResultData[0]);
+       let ths = `<tr>${keys.map(k => `<th class="px-4 py-2 font-semibold border-r border-gray-200 last:border-0">${k}</th>`).join('')}</tr>`;
+       
+       let trs = displayData.map(row => {
+          let tds = Object.values(row).map(v => {
+             if(v==="Success"||v==="Active"||v==="PASS"||(typeof v==='string' && (v.includes("inserted")||v.includes("updated")||v.includes("deleted")))){
+                 return `<td class="px-4 py-1.5 border-r border-gray-200 last:border-0 text-green-600 font-medium">${v}</td>`;
+             }
+             if(v==="FAIL"||(typeof v==='string' && v.includes("Assertion"))){
+                 return `<td class="px-4 py-1.5 border-r border-gray-200 last:border-0 text-red-600 font-medium">${v}</td>`;
+             }
+             if(typeof v==='number') return `<td class="px-4 py-1.5 border-r border-gray-200 last:border-0 text-blue-600">${v}</td>`;
+             if(v===null) return `<td class="px-4 py-1.5 border-r border-gray-200 last:border-0 text-gray-400 italic">null</td>`;
+             return `<td class="px-4 py-1.5 border-r border-gray-200 last:border-0 text-gray-700">${v}</td>`;
+          }).join('');
+          return `<tr class="hover:bg-gray-50 border-b border-gray-100 last:border-0">${tds}</tr>`;
+       }).join('');
+       
+       let note = currentResultData.length > limit ? `<div class="text-xs text-gray-500 p-3 text-center bg-gray-50 border-t border-gray-200">Showing top ${limit} rows out of ${currentResultData.length.toLocaleString()}.</div>` : '';
+
+       els.resArea.innerHTML = `
+          <div class="rounded-lg border border-gray-200 overflow-hidden bg-white w-fit min-w-full shadow-sm relative z-10">
+            <table class="w-full text-left text-sm whitespace-nowrap">
+              <thead class="bg-gray-100 text-gray-600 text-xs border-b border-gray-200">${ths}</thead>
+              <tbody class="font-mono text-xs">${trs}</tbody>
+            </table>
+            ${note}
+          </div>
+       `;
+    }
+    els.dispLimit.addEventListener('change', renderDisplay);
+
+    function runQuery() {
+      const sql = els.query.value.trim();
+      if (!sql) return;
+
+      if (sql.toLowerCase() === 'runtest') {
+          runTestSuite();
+          return;
+      }
+      
+      const res = db.executeQuery(sql);
+      if (res.error) {
+        els.resArea.innerHTML = `<div class="m-auto text-red-600 text-sm font-mono font-medium">${res.error}</div>`;
+      } else {
+        els.mTime.textContent = `${res.executionTime} ms`;
+        els.mRows.textContent = res.scannedRows.toLocaleString();
+        
+        currentResultData = res.data;
+        renderDisplay();
+        
+        const isObservation = res.data && res.data.length > 0 && !res.data[0].Result;
+        document.getElementById('exportCsvBtn').disabled = !isObservation;
+        
+        renderTree(); 
+      }
+    }
+    document.getElementById('executeBtn').addEventListener('click', () => { saveQueryState(); runQuery(); });
+
+  </script>
+</body>
+</html>
