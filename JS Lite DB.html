@@ -3029,6 +3029,10 @@
 
       els.resArea.innerHTML = `<div class="m-auto text-blue-500 text-sm font-mono animate-pulse font-medium">Running test suite (200+ cases)...</div>`;
       
+      // ユーザーの現在のDB状態をバックアップし、テスト用のクリーンなDBを構築
+      const userDbBackup = db.exportForIDB();
+      db = new DatabaseEngine();
+
       const tests = [
         // DDL & Indexing
         { name: "Create Table A", sql: "CREATE TABLE test_a (id, val, category)", check: r => r.data[0].Result === "Success" },
@@ -3644,6 +3648,9 @@
         }
         results.push({ TestName: t.name, Status: status, ExecutionTimeMs: time.toFixed(2), Error: errMsg });
       }
+      
+      // テスト終了後にユーザーの元のDB状態を完全に復元
+      db.importFromIDB(userDbBackup);
       
       currentResultData = results;
       
