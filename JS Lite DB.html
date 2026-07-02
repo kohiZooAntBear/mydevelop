@@ -1215,7 +1215,7 @@
                           explainPlan.push({ Step: explainPlan.length + 1, Operation: 'HASH JOIN', Details: `Build hash on '${join.table}.${rightColMatch}', probe with '${leftAliasMatch}.${leftColMatch}'` });
                       }
                   } else {
-                      explainPlan.push({ Step: explainPlan.length + 1, Operation: 'NESTED LOOP JOIN', Details: `Join '${join.table}' ON ${join.onCond}` });
+                          explainPlan.push({ Step: explainPlan.length + 1, Operation: 'NESTED LOOP JOIN', Details: `Join '${join.table}' ON ${join.onCond}` });
                   }
               }
 
@@ -2147,6 +2147,34 @@
     let currentResultData = null; 
     let currentSort = { col: null, asc: true };
 
+    // --- Auto Load / Auto Save ---
+    let autoSaveTimer = null;
+    function triggerAutoSave() {
+        if (isTesting) return;
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = setTimeout(async () => {
+            try {
+                await saveDB(db.exportForIDB());
+                console.log("Database auto-saved.");
+            } catch (e) {
+                console.error("Auto-save error:", e);
+            }
+        }, 1000); 
+    }
+
+    (async function autoLoad() {
+        try {
+            const dump = await loadDB();
+            if (dump) {
+                db.importFromIDB(dump);
+                renderTree();
+                els.resArea.innerHTML = `<div class="m-auto text-gray-500 text-sm">Auto-loaded previous session data.</div>`;
+            }
+        } catch(e) {
+            console.error("Auto-load error:", e);
+        }
+    })();
+
     const els = {
        query: document.getElementById('queryInput'),
        hl: document.getElementById('highlightLayer'),
@@ -2602,6 +2630,7 @@
             renderTree();
             document.getElementById('schemaModal').classList.add('hidden');
             showToast(`Table '${tName}' のスキーマを更新しました。`);
+            triggerAutoSave();
         } catch (e) {
             // ロールバック
             backupTableObj.rebuildIndices();
@@ -2761,6 +2790,7 @@
 
                 renderTree();
                 showToast(`${successCount} / ${statements.length} 件のSQL文を実行しました。`);
+                if (successCount > 0) triggerAutoSave();
             } catch(err) { showToast(`SQLインポート失敗: ${err.message}`, true); }
         };
         reader.readAsText(file);
@@ -2793,6 +2823,7 @@
        renderTree();
        showToast(`${generatedCount.toLocaleString()}行のデータを ${tbl} に追加しました。`);
        document.getElementById('generatorModal').classList.add('hidden');
+       triggerAutoSave();
     });
 
     document.getElementById('execCsvImportBtn').addEventListener('click', () => {
@@ -2850,6 +2881,7 @@
                 }
                 renderTree();
                 showToast(`${importedCount} 行を ${tableName} にインポートしました。`);
+                if (importedCount > 0) triggerAutoSave();
             } catch(err) { showToast(`インポート失敗: ${err.message}`, true); }
         };
         reader.readAsText(file);
@@ -3654,6 +3686,7 @@
         document.getElementById('exportCsvBtn').disabled = !isObservation;
         
         renderTree(); 
+        if (!/^(select|explain)\s+/i.test(sql)) triggerAutoSave();
       }
     }
     document.getElementById('executeBtn').addEventListener('click', () => { saveQueryState(); runQuery(); });
